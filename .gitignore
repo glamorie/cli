@@ -1,0 +1,63 @@
+# Compiled object files
+*.o
+*.obj
+*.so
+*.a
+*.lib
+*.dll
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.elf
+
+# Debug files
+*.pdb
+*.ilk
+*.idb
+*.dSYM/
+*.rdi
+
+# Precompiled headers
+*.gch
+*.pch
+
+*.tmp
+*.log
+*.swp
+*~
+*.bak
+
+# Directories
+/build/
+/bin/
+/Debug/
+/Release/
+/out/
+/cmake-build-*/
+
+# Build system files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Editor files
+.vs/
+*.vcxproj.user
+*.sdf
+*.opensdf
+*.ipch
+*.VC.db
+*.VC.VC.opendb
+.idea/
+*.layout
+*.depend
+*.vscode/
+*.sublime-workspace
+*.sublime-project
