@@ -224,3 +224,132 @@ CliPeekNewLine(const u8* Value, usize Length)
   };
   return Span;
 };
+
+// Internal allocator
+
+typedef struct cli_arena cli_arena;
+struct cli_arena
+{
+  cli_arena* Prev;
+  cli_arena* Current;
+  usize Offset;
+  usize Size;
+  usize Position;
+  u8* Base;
+};
+
+#define _CliArenaHeader (0x80)
+
+cli_arena*
+CliArenaMake(usize Reserve)
+{
+  Reserve = CliAlignUp(Reserve, 1<<10);
+  
+  cli_arena* Arena = CliMalloc(_CliArenaHeader + Reserve);
+  
+  if (Arena)
+  {
+    Arena->Prev = 0;
+    Arena->Current = Arena;
+    Arena->Offset = 0;
+    Arena->Size = Reserve;
+    Arena->Position = _CliArenaHeader;
+    Arena->Base = (void*)(Arena);
+  };
+  return Arena;
+};
+
+void
+CliArenaTake(cli_arena* Arena)
+{
+  Arena = Arena? Arena->Current : 0;
+  
+  while (Arena)
+  {
+    cli_arena* Prev = Arena->Prev;
+    CliFree(Arena);
+    Arena = Prev;
+  };
+};
+
+void*
+CliArenaPush(cli_arena* Arena, usize Size)
+{
+  const usize Align = sizeof(void*);
+  
+  if (!Arena || !Size) return 0;
+  Start:
+  cli_arena* Current = Arena->Current;
+  usize Padding = CliAlignPadding((usize)(Current->Base + Current->Position), Align);
+  
+  if (Current->Size < Current->Position + Padding + Size)
+  {
+    cli_arena* Node = CliArenaMake(CliMax(_CliArenaHeader + Align + Size, Current->Size));
+    
+    if (!Node) return 0;
+    
+    Node->Prev = Current;
+    Node->Offset = Current->Offset + Current->Size;
+    Arena->Current = Node;
+    goto Start;
+  };
+  
+  Current->Position += Padding;
+  void* Allocation = Current->Base + Current->Position;
+  Current->Position += Size;
+  return Allocation;
+};
+
+void*
+CliArenaPushN(cli_arena* Arena, usize Size, usize Count)
+{
+  return CliArenaPush(Arena, Size * Count);
+};
+
+void*
+CliArenaZPush(cli_arena* Arena, usize Size)
+{
+  return CliMemoryZero(CliArenaPush(Arena, Size), Size);
+};
+
+void*
+CliArenaZPushN(cli_arena* Arena, usize Size, usize Count)
+{
+  return CliArenaZPush(Arena, Size * Count);
+};
+
+usize
+CliArenaPosition(cli_arena* Arena)
+{
+  return Arena? Arena->Offset + Arena->Position : 0;
+};
+
+void
+CliArenaPopTo(cli_arena* Arena, usize Position)
+{
+  if (!Arena) return;
+  
+  Position = CliMax(Position, _CliArenaHeader);
+  cli_arena* Current = Arena->Current;
+  
+  while (Position < Current->Offset)
+  {
+    cli_arena* Prev = Current->Prev;
+    CliFree(Current);
+    Current = Prev;
+  };
+  
+  Current->Position = Position;
+  Arena->Current = Current;
+};
+
+void
+CliArenaPop(cli_arena* Arena, usize Size)
+{
+  usize CurrentPosition = CliArenaPosition(Arena);
+  
+  if (Size < CurrentPosition)
+  {
+    CliArenaPopTo(Arena, CurrentPosition - Size);
+  };
+};
