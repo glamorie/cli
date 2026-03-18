@@ -353,3 +353,63 @@ CliArenaPop(cli_arena* Arena, usize Size)
     CliArenaPopTo(Arena, CurrentPosition - Size);
   };
 };
+
+// Internal sting
+
+typedef struct cli_str cli_str;
+struct cli_str
+{
+  u8* Value;
+  usize Length;
+};
+
+#define CliStrLit(s) ((cli_str){(u8*)(s), sizeof(s) - 1})
+
+cli_str
+CliStrC(const char* Value, cli_arena* Arena)
+{
+  cli_str Out = {0};
+  usize Length = CliStrLen(Value);
+  Out.Value = CliArenaPush(Arena, Length + 1);
+  if (Out.Value)
+  {
+    Out.Length = Length;
+    CliMemoryCopy(Out.Value, Value, Length + 1);
+    Out.Value[Length] = 0;
+  };
+  return Out;
+};
+
+cli_str
+CliStrK(const char* Value)
+{
+  cli_str Out = {0};
+  Out.Value = (u8*)Value;
+  Out.Length = CliStrLen(Value);
+  return Out;
+};
+
+u32
+CliStrEqual(cli_str A, cli_str B)
+{
+  if (A.Length != B.Length) return 0;
+  
+  for (usize i = 0; i < A.Length; i++)
+  {
+    if (A.Value[i] != B.Value[i]) return 0;
+  };
+  return 1;
+};
+
+static usize
+CliStringCompareCaseInsensitive(cli_str s, cli_str Prefix)
+{
+  usize Count = CliMin(Prefix.Length, s.Length);
+  
+  for (int i = 0; i < Count; i++) 
+  {
+    char c = CliCharToLower(s.Value[i]);    
+    if (c != Prefix.Value[i]) return i;
+  };
+  return Count;
+};
