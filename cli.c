@@ -413,3 +413,100 @@ CliStringCompareCaseInsensitive(cli_str s, cli_str Prefix)
   };
   return Count;
 };
+
+// Types
+
+typedef struct cli_value cli_value;
+struct cli_value
+{
+  usize Length;
+  union
+  {
+    i64* Number;
+    double* Float;
+    const char** String;
+    i64* LNumber;
+    double* LFloat;
+    const char** LString;
+  };
+};
+
+typedef struct cli_arg cli_arg;
+struct cli_arg
+{
+  cli_arg* Prev;
+  cli_arg* Next;
+  cli_str Name;
+  cli_str Desc;
+  cli_value Value;
+  u32 Count;
+  u16 Kind;
+  u16 Set;
+};
+
+typedef struct cli_opt cli_opt;
+struct cli_opt
+{
+  cli_opt* Prev;
+  cli_opt* Next;
+  cli_str Name;
+  cli_str Desc;
+  u32 Value;
+};
+
+typedef struct cli_cmd cli_cmd;
+struct cli_cmd
+{
+  cli_cmd* Prev;
+  cli_cmd* Next;
+  cli_str Name;
+  cli_str Desc;
+  cli_arg* AHead;
+  cli_arg* ATail;
+  
+  cli_arg* KHead;
+  cli_arg* KTail;
+  
+  cli_opt* OHead;
+  cli_opt* OTail;
+};
+
+typedef struct cli_error_cursor cli_error_cursor;
+struct cli_error_cursor
+{
+  cli_str Parsing;
+  cli_arg* RequiredArg;
+  cli_arg* MissingValue;
+  cli_arg* NotEnoughValues;
+  cli_str UknownOption;
+  cli_str UknownCommand;
+  cli_arg* ArgumentDoesNotExpectValue;
+  cli_str UnexpectedValue;
+  usize ExpectedCount, GotCount;
+  u32 Kind;
+};
+
+typedef struct cli cli;
+struct cli
+{
+  cli_arena* Arena;
+  cli_error_cursor Error;
+  
+  cli_str Name;
+  cli_str Desc;
+  
+  cli_opt* OHead;
+  cli_opt* OTail;
+  
+  cli_cmd* CHead;
+  cli_cmd* CTail;
+  
+  cli_cmd* Default;
+  cli_cmd* Current;
+  cli_arg* Positional;
+  
+  usize Indentation;
+  u32 Frames;
+  const char** Argv;
+  usize Count;
+};
