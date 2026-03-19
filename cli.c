@@ -702,3 +702,388 @@ CliStrN(cli* Cli, const char*** Value, usize* Length, usize Count, const char* N
   if (!Required) *Value = 0, *Length = 0;
   CliPushArg(Cli, Name, Desc, In, CliValueString, Count, Required);
 };
+
+// Parsing integers and floats
+// Ported from https://github.com/odin-lang/Odin/blob/master/core/strconv/strconv.odin
+
+typedef struct cli_flit cli_flit;
+struct cli_flit
+{
+  union 
+  {
+    u64 Bits;
+    double Value;
+  };
+};
+
+#define CLI_FLT_LITERAL(v) (((cli_flit){.Bits = (v)}).Value)
+#define CLI_INFINITY CLI_FLT_LITERAL(0x7ff0000000000000ULL)
+#define CLI_NAN CLI_FLT_LITERAL(0x7ff8000000000000ULL)
+
+typedef struct cli_double_parse cli_double_parse;
+struct cli_double_parse
+{
+  double Value;
+  int End;
+  u32 Ok;
+};
+
+typedef struct cli_double_parse_component cli_double_parse_component;
+struct cli_double_parse_component
+{
+  u64 Mantissa;
+  int Exponent;
+  int Truncate;
+  int Hex;
+  int i;
+  u32 Negative;
+  u32 Ok;
+};
+
+static cli_double_parse 
+CliCheckDoubleLiteral(cli_str s)
+{
+  cli_double_parse Result = {0};
+  
+  if (s.Length == 0) return Result;
+  
+  int sign = 1;
+  int nsign = 0;
+  
+  char c0 = s.Value[0];
+  
+  if (c0 == '+' || c0 == '-') 
+  {
+    if (c0 == '-') sign = -1;
+    
+    nsign = 1;
+    s.Value += 1;
+    s.Length -= 1;
+  };
+  
+  if (s.Length == 0) return Result;
+  
+  switch (s.Value[0]) 
+  {
+    case 'i':
+    case 'I':
+    {
+      usize m = CliStringCompareCaseInsensitive(s, CliStrLit("infinity"));
+      
+      if (m >= 3 && m < 9) 
+      {
+        Result.Value = sign * CLI_INFINITY;
+        
+        if (m == 8) Result.End = nsign + m;
+        else Result.End = nsign + 3;
+        
+        Result.Ok = 1;
+        return Result;
+      }
+    } break;
+    
+    case 'n':
+    case 'N':
+    {
+      if (CliStringCompareCaseInsensitive(s, CliStrLit("nan")) == 3) 
+      {
+        Result.Value = CLI_NAN;
+        Result.End = nsign + 3;
+        Result.Ok = 1;
+        return Result;
+      };
+    } break;
+  };
+  
+  return Result;
+};
+
+static cli_double_parse_component 
+CliDoubleParseComponentCliStrLit(cli_str s)
+{
+  cli_double_parse_component Result = {0};
+  
+  if (s.Length == 0) return Result;
+  
+  int i = 0;
+  
+  if (s.Value[i] == '+') 
+  {
+    i++;
+  } else if (s.Value[i] == '-') 
+  {
+    Result.Negative = 1;
+    i++;
+  }
+  
+  u64 Base = 10;
+  int MAX_MANT_DIGITS = 19;
+  char ExpChar = 'e';
+  
+  if (i + 2 < (int)s.Length && s.Value[i] == '0' && CliCharToLower(s.Value[i+1]) == 'x')
+  {
+    Base = 16;
+    MAX_MANT_DIGITS = 16;
+    i += 2;
+    ExpChar = 'p';
+    Result.Hex = 1;
+  };
+  
+  int SawDot = 0;
+  int SawDigits = 0;
+  
+  int Nd = 0;
+  int NdMant = 0;
+  int DecimalPoint = 0;
+  
+  for (; i < (int)s.Length; i++) 
+  {
+    char c = s.Value[i];
+    
+    if (c == '_') continue;
+    if (c == '.') 
+    {
+      if (SawDot) break;
+      
+      SawDot = 1;
+      DecimalPoint = Nd;
+      continue;
+    };
+    
+    if ('0' <= c && c <= '9') 
+    {
+      SawDigits = 1;
+      Nd++;
+      
+      if (NdMant < MAX_MANT_DIGITS) 
+      {
+        Result.Mantissa *= Base;
+        Result.Mantissa += (u64)(c - '0');
+        NdMant++;
+      } else if (c != '0') 
+      {
+        Result.Truncate = 1;
+      };      
+      continue;
+    };
+    
+    if (Base == 16) 
+    {
+      char Lch = CliCharToLower(c);
+      
+      if ('a' <= Lch && Lch <= 'f') 
+      {
+        SawDigits = 1;
+        Nd++;
+        
+        if (NdMant < MAX_MANT_DIGITS) 
+        {
+          Result.Mantissa *= 16;
+          Result.Mantissa += (u64)(Lch - 'a' + 10);
+          NdMant++;
+        } else
+        {
+          Result.Truncate = 1;
+        };        
+        continue;
+      };
+    };
+    
+    break;
+  };
+  
+  if (!SawDigits) return Result;
+  
+  if (!SawDot) DecimalPoint = Nd;
+  
+  if (Base == 16) 
+  {
+    DecimalPoint *= 4;
+    NdMant *= 4;
+  };
+  
+  if (i < (int)s.Length && CliCharToLower(s.Value[i]) == ExpChar) 
+  {
+    
+    i++;
+    
+    int ExpSign = 1;
+    
+    if (s.Value[i] == '+') 
+    {
+      i++;
+    } else if (s.Value[i] == '-') 
+    {
+      ExpSign = -1;
+      i++;
+    };
+    
+    int e = 0;
+    
+    for (; i < (int)s.Length; i++) 
+    {
+      
+      char c = s.Value[i];
+      
+      if (c == '_') continue;
+      
+      if (c < '0' || c > '9') break;
+      
+      if (e < 100000) e = e*10 + (c - '0');
+    };
+    
+    DecimalPoint += e * ExpSign;
+  } else if (Base == 16) 
+  {
+    return Result;
+  };
+  
+  if (Result.Mantissa != 0) Result.Exponent = DecimalPoint - NdMant;
+  
+  Result.i = i;
+  Result.Ok = 1;
+  
+  return Result;
+};
+
+static double
+CliPow10(int e)
+{
+  static const double Powers[] = 
+  {
+    1e1, 1e2, 1e4, 1e8, 1e16, 1e32, 1e64, 1e128, 1e256
+  };
+  double Result = 1.0;
+  
+  if (e < 0)
+  {
+    e = -e;
+    for (int i = 0; e; i++, e >>= 1)
+    {
+      if (e & 1) Result *= Powers[i];
+    };
+    return 1.0 / Result;
+  };
+  for (int i = 0; e; i++, e >>= 1)
+  {
+    if (e & 1) Result *= Powers[i];
+  };  
+  return Result;
+};
+
+static cli_double_parse 
+CliDoubleParse(cli_str str)
+{
+  cli_double_parse Result = {0};
+  
+  cli_double_parse ParseLiteral = CliCheckDoubleLiteral(str);
+  if (ParseLiteral.Ok) return ParseLiteral;
+  cli_double_parse_component ParseComponent = CliDoubleParseComponentCliStrLit(str);
+  
+  if (!ParseComponent.Ok) return Result;
+  
+  Result.End = ParseComponent.i;
+  
+  double f = (double)ParseComponent.Mantissa;
+  
+  if (ParseComponent.Negative) f = -f;
+  
+  if (ParseComponent.Exponent != 0) f *= CliPow10(ParseComponent.Exponent);
+  
+  Result.Value = f;
+  Result.Ok = 1;
+  
+  return Result;
+};
+
+double
+CLiStrToD(cli_str Str, usize* End)
+{
+  cli_double_parse Result = CliDoubleParse(Str);
+  if (End) *End = Result.End;
+  return Result.Value;
+};
+
+// Parse integers
+
+typedef struct cli_int_parse cli_int_parse;
+struct cli_int_parse
+{
+  i64 Value;
+  int End;
+  u32 Ok;
+};
+
+static cli_int_parse
+CliIntParse(cli_str Value)
+{
+  cli_int_parse Result = {0};
+  int i = 0;
+  int Negative = 0;
+  
+  
+  switch (i < Value.Length ? Value.Value[i] : 0)
+  {
+    case '+': i++; break;
+    case '-': i++; Negative = 1; break;
+  };
+  
+  
+  int Base = 10;
+  u32 SawDigits = 0;
+  
+  if (i < Value.Length && CliCharToLower(Value.Value[i]) == '0')
+  {
+    
+    if (i + 1 < Value.Length)
+    {
+      u8 Ch = CliCharToLower(Value.Value[i + 1]);
+      
+      if (Ch == 'x')
+      {
+        Base = 16;
+        i += 2;
+      } else if (Ch == 'b')
+      {
+        Base = 2;
+        i += 2;
+      } else if (Ch == 'o')
+      {
+        Base = 8;
+        i += 2;
+      };
+    } else 
+    {
+      Base = 8; // 012...
+    };
+  };
+  
+  
+  for (; i < Value.Length; i++)
+  {
+    u8 Ch = Value.Value[i];
+    
+    if (Ch == '_') continue;
+    
+    int D = CliDigitValue(Ch);
+    if (D < 0 || D >= Base) break;
+    
+    SawDigits  = 1;
+    
+    Result.Value = Result.Value * Base + D;
+  };
+  
+  Result.Ok = i == Result.End && SawDigits;
+  Result.End = i;
+  Result.Value = Negative ? -Result.Value : Result.Value;
+  return Result;
+};
+
+static i64
+CliStringToInt(cli_str Value, u8** End)
+{
+  cli_int_parse Parse = CliIntParse(Value);
+  
+  if (End) *End = Parse.Ok ? 0 : Value.Value + Parse.End;
+  return Parse.Value;
+};
