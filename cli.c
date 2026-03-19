@@ -197,6 +197,23 @@ CliCharUtf8Encode(u32 Char, u8* Out)
 };
 
 static usize
+CliCharUtf16Encode(u32 Char, u16 Parts[2])
+{
+  if (Char <= 0xFFFF) 
+  {
+    Parts[0] = (u16)Char;
+    return 1;
+  } else if (Char <= 0x10FFFF) 
+  {
+    Char -= 0x10000;
+    Parts[0] = 0xD800 | ((Char >> 10) & 0x3FF); // high surrogate
+    Parts[1] = 0xDC00 | (Char & 0x3FF);         // low surrogate
+    return 2;
+  };
+  return 0;
+};
+
+static usize
 CliPeekNewLine(const u8* Value, usize Length)
 {
   usize Span = 0;
@@ -2041,4 +2058,205 @@ CliWriteHelp(cli_writeable Out, cli* Cli, usize Client)
     CliWriteCommands(Out, Cli->CHead, "Commands: ", Cli->Indentation, Client);
     CliWriteOptions(Out, Cli->OHead, "Global Options:", Cli->Indentation, Client);
   };
+};
+
+
+// Byte buffer
+typedef struct cli_sb_node cli_sb_node;
+struct cli_sb_node
+{
+  cli_sb_node* Next;
+  u8* Value;
+};
+
+typedef struct cli_sb cli_sb;
+struct cli_sb
+{
+  cli_arena* Arena;
+  cli_sb_node* Head;
+  cli_sb_node* Tail;
+  usize Length;
+  usize Capacity;
+  usize ChunkSize;
+  u32 TryGrow;
+};
+
+static u32
+CliSbReserve(cli_sb* Buffer, usize Size)
+{
+  if (!Buffer || !Buffer->TryGrow) return 0;
+  
+  if (Buffer->Length + Size <= Buffer->Capacity) return 1;
+
+  cli_sb_node* Node = CliArenaZPush(Buffer->Arena, sizeof(*Node));
+  if (Node)
+  {
+    Node->Value = CliArenaPush(Buffer->Arena, Buffer->ChunkSize);
+    if (Node->Value)
+    {
+      if (Buffer->Tail) Buffer->Tail->Next = Node;
+      else Buffer->Head = Node;
+      Buffer->Tail = Node;
+      Buffer->Capacity += Buffer->ChunkSize;
+      return 1;
+    };
+  };
+  Buffer->TryGrow = 0;
+  return 0;
+};
+
+static u32
+CliSbPush(cli_sb* Buffer, u8* Bytes, usize Length)
+{
+  usize i = 0;
+
+  while (i < Length)
+  {
+    usize Copy = CliMin(Length - i, Buffer->ChunkSize - Buffer->Length % Buffer->ChunkSize);
+    if (!CliSbReserve(Buffer, Copy)) break;
+    if (Copy)
+    {
+      CliMemoryCopy(Buffer->Tail->Value + Buffer->Length % Buffer->ChunkSize, Bytes + i, Copy);
+      i += Copy;
+      Buffer->Length += Copy;
+    };
+  };
+  return i == Length;
+};
+
+static void
+CliSbCopy(cli_sb* Buffer, u8* Out, usize Length)
+{
+  if (!Buffer || !Out || Length == 0) return;
+  
+  usize i = 0;
+  for (cli_sb_node* Node = Buffer->Head; Node && i < Length; Node = Node->Next)
+  {
+    // determine how much to copy from this node
+    usize node_len = (Node == Buffer->Tail) ? (Buffer->Length % Buffer->ChunkSize) : Buffer->ChunkSize;
+    if (node_len == 0) node_len = Buffer->ChunkSize; // full tail chunk
+    
+    usize copy = CliMin(Length - i, node_len);
+    
+    CliMemoryCopy(Out + i, Node->Value, copy);
+    i += copy;
+  };
+};
+
+u8*
+CliSbRead8(cli_sb* Buffer, usize* Length)
+{
+  u8* Out = 0;
+  usize L = 0;
+  if (Buffer)
+  {
+    L = Buffer->Length;
+    Out = CliMalloc(L + 1);
+    CliSbCopy(Buffer, Out, L);
+    if (Out) Out[L] = 0;
+  };
+
+  if (Length) *Length = L;
+  return Out;
+};
+
+static u16*
+CliSbRead16(cli_sb* Buffer, usize* Length)
+{
+  u16* Out = 0;
+  usize L = 0;
+  if (Buffer)
+  {
+    L = Buffer->Length / sizeof(u16);
+    Out = CliMalloc((L + 1) * sizeof(u16));
+    CliSbCopy(Buffer, (u8*)Out, L * sizeof(u16));
+    if (Out) Out[L] = 0;
+  };
+  if (Length) *Length = L;
+  return Out;
+};
+
+static void
+CliSb_Write(void* This, u32 Char)
+{
+  cli_sb* Buffer = This;
+  u8 Parts[4];
+  usize Length = CliCharUtf8Encode(Char, Parts);
+  CliSbPush(Buffer, Parts, Length);
+};
+
+static void
+CliSb_Write16(void* This, u32 Char)
+{
+  cli_sb* Buffer = This;
+  u16 Parts[2];
+  usize Length = CliCharUtf16Encode(Char, Parts);
+  CliSbPush(Buffer, (u8*)Parts, Length * sizeof(u16));
+};
+
+static void
+CliFile_Write(void* This, u32 Char)
+{
+  cli_file_t File = This;
+  u8 Parts[4];
+  usize Length = CliCharUtf8Encode(Char, Parts);
+  
+  CliFileWrite(File, Parts, 1, Length);
+};
+
+static void
+CliHelpWrite(cli* Cli, cli_file_t File, usize ConsoleWidth)
+{
+  if (!Cli) return;
+
+  cli_writeable Out;
+  Out.Callback = CliFile_Write;
+  Out.This = (void*)File;
+  CliWriteHelp(Out, Cli, ConsoleWidth);
+  CliFileFlush(File);
+};
+
+const char*
+CliHelpAsString(cli* Cli, size_t* Length, usize ConsoleWidth)
+{
+  const char* String = 0;
+  usize L = 0;
+
+  if (Cli)
+  {
+    usize Position = CliArenaPosition(Cli->Arena);
+    cli_sb Buffer = {0};
+    Buffer.Arena = Cli->Arena;
+    Buffer.ChunkSize = 2<<10;
+    cli_writeable Out;
+    Out.Callback = CliSb_Write;
+    Out.This = &Buffer;
+    CliWriteHelp(Out, Cli, ConsoleWidth);
+    String = (const char*)CliSbRead8(&Buffer, &L);
+    CliArenaPopTo(Cli->Arena, Position);
+  };
+  if (Length) *Length = L;
+  return String;
+};
+
+u16*
+CliHelpAsString16(cli* Cli, size_t* Length, usize ConsoleWidth)
+{
+  u16* String = 0;
+  usize L = 0;
+
+  if (Cli)
+  {
+    usize Position = CliArenaPosition(Cli->Arena);
+    cli_sb Buffer = {0};
+    Buffer.Arena = Cli->Arena;
+    Buffer.ChunkSize = 4<<10;
+    cli_writeable Out;
+    Out.Callback = CliSb_Write16;
+    Out.This = &Buffer;
+    CliWriteHelp(Out, Cli, ConsoleWidth);
+    String = CliSbRead16(&Buffer, &L);
+    CliArenaPopTo(Cli->Arena, Position);
+  };
+  return String;
 };
