@@ -1087,3 +1087,69 @@ CliStringToInt(cli_str Value, u8** End)
   if (End) *End = Parse.Ok ? 0 : Value.Value + Parse.End;
   return Parse.Value;
 };
+
+// Searching nodes
+static cli_str
+CliExpandName(cli_str Name, u8* Alias) // Extract the alias and the flag of the name
+{
+  u8 A = 0;
+  cli_str Out = {0};
+  int i = 0;
+  
+  if (Name.Value[0] == '!')
+  {
+    Name.Value = Name.Value + 1;
+    Name.Length = Name.Length - 1;
+  };
+  
+  if (Name.Value[0] == ',')
+  {
+    Out.Value = Name.Value + 1;
+    Out.Length = Name.Length - 1;
+    A = Name.Value[1];
+  } else if (Name.Value[1] == ',')
+  {
+    A = Name.Value[0];
+    Out.Value = Name.Value + 2;
+    Out.Length = Name.Length - 2;
+  } else 
+  {
+    Out.Value = Name.Value;
+    Out.Length = Name.Length;
+  };
+  if (Alias) *Alias = A;
+  return Out;
+};
+
+#define CliSearchNodes(Node, Flag) \
+{ \
+  u8 Alias = Flag.Length == 1 ? Flag.Value[0] : 0; \
+  for (; (Node); (Node) = (Node)->Next) \
+  { \
+    u8 NAlias = 0; \
+    cli_str NFlag = CliExpandName((Node)->Name, &NAlias); \
+    if (Flag.Length == 1 ? NAlias == Alias : CliStrEqual(NFlag, Flag)) return (Node); \
+  }; \
+}
+
+static cli_cmd*
+CliCmdSearch(cli_cmd* Head, cli_str Flag) 
+{
+  CliSearchNodes(Head, Flag);
+  return 0;
+};
+
+static cli_opt* 
+CliOptSearch(cli_opt* Head1, cli_opt* Head2, cli_str Flag)
+{
+  CliSearchNodes(Head1, Flag);
+  CliSearchNodes(Head2, Flag);
+  return 0;
+};
+
+static cli_arg*
+CliArgSearch(cli_arg* Head, cli_str Flag)
+{
+  CliSearchNodes(Head, Flag);
+  return 0;
+};
