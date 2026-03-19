@@ -86,6 +86,6 @@ void
 CliFloatN(cli* Cli, double** Value, usize* Length, usize Count, const char* Name, const char* Desc);
 
 void
-CliStrN(cli* Cli, const char** Value, usize* Length, usize Count, const char* Name, const char* Desc);
+CliStrN(cli* Cli, const char*** Value, usize* Length, usize Count, const char* Name, const char* Desc);
 
 #endif /* CMD_H*/
