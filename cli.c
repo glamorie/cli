@@ -1776,3 +1776,14 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
   Cli->Current = Command;
   return Error;
 };
+
+u32
+CliParse(cli* Cli, const char** Argv, u32 Length)
+{
+  if (!Cli) return 0;
+
+  Cli->Error = CliLexerParse(Cli, Argv, Length);
+  Cli->Argv = Argv;
+  Cli->Count = Length;
+  return !!Cli->Error.Kind;
+};
