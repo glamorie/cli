@@ -1,6 +1,7 @@
 #ifndef CMD_H
 #define CMD_H
 #include <stdint.h>
+#include <stddef.h>
 
 #if !defined(CliMalloc) || !defined(CliFree)
   #include <stdlib.h>
@@ -17,6 +18,16 @@
   #define cli_file_t FILE*
   #define CliFileWrite(File, Ptr, Size, Count) fwrite((Ptr), (Size), (Count), (File))
 #endif
+
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int8_t i8;
+typedef int16_t i16;
+typedef int32_t i32;
+typedef int64_t i64;
+typedef size_t usize;
 
 typedef struct cli cli;
 
@@ -51,30 +62,30 @@ void
 CliOption(cli* Cli, int* Value, const char* Name, const char* Desc);
 
 void
-CliInt(cli* Cli, signed long long int* Value, const char* Name, const char* Desc);
+CliInt(cli* Cli, i64* Value, const char* Name, const char* Desc);
 
 void
 CliFloat(cli* Cli, double* Value, const char* Name, const char* Desc);
 
 void
-CliStr(cli* Cli, const char* Value, const char* Name, const char* Desc);
+CliStr(cli* Cli, const char** Value, const char* Name, const char* Desc);
 
 void
-CliIntOr(cli* Cli, signed long long int* Value, signed long long int Default, const char* Name, const char* Desc);
+CliIntOr(cli* Cli, i64* Value, i64 Default, const char* Name, const char* Desc);
 
 void
 CliFloatOr(cli* Cli, double* Value, double Default, const char* Name, const char* Desc);
 
 void
-CliStrOr(cli* Cli, const char* Value, double Default, const char* Name, const char* Desc);
+CliStrOr(cli* Cli, const char** Value, const char* Default, const char* Name, const char* Desc);
 
 void
-CliIntN(cli* Cli, signed long long int** Value, int* Length, const char* Name, const char* Desc);
+CliIntN(cli* Cli, i64** Value, int* Length, int Count, const char* Name, const char* Desc);
 
 void
-CliFloatN(cli* Cli, double** Value, int* Length, const char* Name, const char* Desc);
+CliFloatN(cli* Cli, double** Value, int* Length, int Count, const char* Name, const char* Desc);
 
 void
-CliStrN(cli* Cli, const char** Value, int* Length, const char* Name, const char* Desc);
+CliStrN(cli* Cli, const char** Value, int* Length, int Count, const char* Name, const char* Desc);
 
 #endif /* CMD_H*/
