@@ -1153,3 +1153,85 @@ CliArgSearch(cli_arg* Head, cli_str Flag)
   CliSearchNodes(Head, Flag);
   return 0;
 };
+
+enum
+{
+  CliErrorNone,
+  CliErrorParsing,
+  CliErrorMissingValue,
+  CliErrorNotEnoughValues,
+  CliErrorUnkownOption,
+  CliErrorExpectedCommandName,
+  CliErrorUnexpectedValue,
+  CliErrorArgumentDoesNotExpectValue,
+  CliErrorUknownCommand,
+  CliErrorRequiredArgument,
+  
+};
+
+#if 0
+const char* _CliErrorName[] =
+{
+  
+  [CliErrorNone] = "CliErrorNone",
+  [CliErrorParsing] = "CliErrorParsing",
+  [CliErrorMissingValue] = "CliErrorMissingValue",
+  [CliErrorNotEnoughValues] = "CliErrorNotEnoughValues",
+  [CliErrorUnkownOption] = "CliErrorUnkownOption",
+  [CliErrorExpectedCommandName] = "CliErrorExpectedCommandName",
+  [CliErrorUnexpectedValue] = "CliErrorUnexpectedValue",
+  [CliErrorArgumentDoesNotExpectValue] = "CliErrorArgumentDoesNotExpectValue",
+  [CliErrorUknownCommand] = "CliErrorUknownCommand",
+  [CliErrorRequiredArgument] = "CliErrorRequiredArgument",
+};
+#endif
+
+static u32 // Parses and set the value to the pointer
+CliParseType(cli_str Source, u16 Type, void* Out, cli_error_cursor* ErrorP)
+{
+  u32 Ok = 0;
+  if (Type == CliValueFloat)
+  {
+    cli_double_parse Result = CliDoubleParse(Source);
+    if (Result.Ok) *((double*)Out) = Result.Value;
+    Ok = Result.Ok;
+  } else if (Type == CliValueInt)
+  {
+    cli_int_parse Result = CliIntParse(Source);
+    if (Result.Ok) *((i64*)Out) = Result.Value;
+    Ok = Result.Ok;
+  } else if (Type == CliValueString)
+  {
+    *((u8**)Out) = Source.Value;
+    Ok = 1;
+  };
+  u32 Error = Ok ? 0 : CliErrorParsing;
+  ErrorP->Kind = Error;
+  ErrorP->Parsing = Source;
+  return Error;
+};
+
+static u32 // Parse and store in the value structure
+CliParseValue(cli_str Source, u16 Type, cli_value* Out, cli_error_cursor* ErrorP)
+{
+  u32 Ok = 0;
+  if (Type == CliValueFloat)
+  {
+    cli_double_parse Result = CliDoubleParse(Source);
+    if (Result.Ok) *Out->Float = Result.Value;
+    Ok = Result.Ok;
+  } else if (Type == CliValueInt)
+  {
+    cli_int_parse Result = CliIntParse(Source);
+    if (Result.Ok) *Out->Number = Result.Value;
+    Ok = Result.Ok;
+  } else if (Type == CliValueString)
+  {
+    *Out->String = (const char*)Source.Value;
+    Ok = 1;
+  };
+  u32 Error = Ok ? 0 : CliErrorParsing;
+  ErrorP->Kind = Error;
+  ErrorP->Parsing = Source;
+  return Error;
+};
