@@ -11,12 +11,14 @@
   #define CliFree(Ptr) free(Ptr)
 #endif
 
-#if !defined(cli_file_t) || !defined(CliFileWrite)
+#if !defined(cli_file_t) || !defined(CliFileWrite) || !defined(CliFileFlush)
   #include <stdio.h>
   #undef cli_file_t
   #undef CliFileWrite
+  #undef CliFileFlush
   #define cli_file_t FILE*
   #define CliFileWrite(File, Ptr, Size, Count) fwrite((Ptr), (Size), (Count), (File))
+  #define CliFileFlush(File) fflush(File)
 #endif
 
 typedef uint8_t u8;
