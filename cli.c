@@ -1148,7 +1148,7 @@ CliOptSearch(cli_opt* Head1, cli_opt* Head2, cli_str Flag)
 };
 
 static cli_arg*
-CliLexerearch(cli_arg* Head, cli_str Flag)
+CliArgSearch(cli_arg* Head, cli_str Flag)
 {
   CliSearchNodes(Head, Flag);
   return 0;
@@ -1531,5 +1531,229 @@ CliLexerReadX(cli_lexer* Args, u16 Kind, cli_value* Value, cli_error_cursor* Err
   *Value->LFloat = Array;
   *Value->Length = Count;
   
+  return Error;
+};
+
+// Aliases can be batched together in one argument. They can also store 
+// a cli_value. To resolve this, we check all the letters in the source and if
+// it matches an alias for an argument, everything else that follows is assumed to 
+// be the cli_value for that argument. If an argument is not found, we try and find
+// an option with that alias and set it. 
+// e.g. '-VsnJames' is the same as '-V' '-s' '-n' 'James' i.e. '--verbose' '--styled' '--name' 'James'
+static u32 
+CliResolveBatchedAlias(cli_str Source, cli_opt* Options1, cli_opt* Options2, cli_arg* Args, cli_error_cursor* ErrorP, u32* Stop)
+{
+  u32 Error = 0;
+  
+  for (usize i = 0; i < Source.Length; i++)
+  {
+    cli_str Alias = {Source.Value + i, 1};
+    cli_opt* Option = 0;
+    cli_arg* Arg = 0;
+    
+    if ((Arg = CliArgSearch(Args, Alias)))
+    {
+      if (Arg->Count == 1)
+      {
+        cli_str Slice = {Source.Value + i, Source.Length - i};
+        Error = CliParseValue(Slice, Arg->Kind, &Arg->Value, ErrorP); 
+        if (!Error) Arg->Set = 1;       
+      } else 
+      {
+        ErrorP->NotEnoughValues = Arg;
+        Error = CliErrorNotEnoughValues;
+      };
+      break;
+    } else if ((Option = CliOptSearch(Options1, Options2, Alias)))
+    {
+      *Option->Value = 1;
+      if (Option->Name.Value[0] == '!')
+      {
+        *Stop = 1;
+        break;
+      };
+    } else 
+    {
+      Error = CliErrorUnkownOption;
+      ErrorP->UknownOption = Source;
+      break;
+    };
+  };
+  return Error;
+};
+
+static cli_error_cursor
+CliLexerParse(cli* Cli, const char** Argv, usize Argc)
+{
+  cli_lexer Args = 
+  {
+    .Values = Argv,
+    .Count = Argc,
+    .Index = 1,
+  };
+  
+  cli_error_cursor Error = {0};
+  u32 Token = 0;
+  cli_str Value = {0};
+  cli_cmd* Command = Cli->Default; // Fall back
+  
+  
+  while (!Error.Kind && CliLexerNext(&Args, &Token, &Value, 0))
+  {
+    // Escaping could be used to specifiy that some name that is also a sub-command's
+    // name should be treated as just a cli_value so we fallback to the default command.
+    
+    if (Token == CliTokenEscape || Token == CliTokenFlagValue) break; 
+    
+    if (Token == CliTokenValue)
+    {
+      cli_cmd* Found = CliCmdSearch(Cli->CHead, Value);
+      Error.UknownCommand = Value;
+      if (Found) Command = Found;
+      else if (Command) CliLexerRollback(&Args);// Assume the name is a positional argument and fallback to the default
+      else Error.Kind = CliErrorUknownCommand;
+      break; 
+    } else if (Token == CliTokenAliasValue)
+    {
+      u32 Stop = 0;
+      Error.Kind = CliResolveBatchedAlias(Value, Cli->OHead, 0, 0, &Error, &Stop);
+      
+      if (Command && Error.Kind ==CliErrorUnkownOption)
+      {
+        CliLexerRollback(&Args);
+        Error.Kind = 0;
+        break;
+      };
+      if (Stop)
+      {
+        Token = CliTokenEof;
+        break;
+      };
+    } else if (Token == CliTokenAlias || Token == CliTokenFlag)
+    {
+      cli_opt* Opt = CliOptSearch(Cli->OHead, 0, Value);
+      if (Opt)
+      {
+        *Opt->Value = 1;
+        if (Opt->Name.Value[0] == '!')
+        {
+          Token = CliTokenEof;
+          break;
+        };
+      };
+      
+      if (Command && !Opt)
+      {
+        CliLexerRollback(&Args);
+        Error.Kind = 0;
+        break;
+      } else if (!Command && !Opt)
+      {
+        Error.Kind = CliErrorUnkownOption;
+      };
+    };
+  };
+  
+  if (!Error.Kind && Command)
+  {
+    cli_arg* Positional = Command->AHead;
+    u32 ConfirmAllSet = 1;
+    while (!Error.Kind && CliLexerNext(&Args, &Token, &Value, 0))
+    {
+      Error.UknownOption = Value;
+      
+      if (Token == CliTokenValue || Token == CliTokenEscape)
+      {
+        CliLexerRollback(&Args);
+        
+        if (Positional)
+        {
+          if (Positional->Count == 1) Error.Kind = CliLexerRead1(&Args, Positional->Kind, &Positional->Value, &Error);
+          else if (Positional->Count) Error.Kind = CliLexerReadN(&Args, Positional->Kind, Positional->Count, &Positional->Value, &Error);
+          else Error.Kind = CliLexerReadX(&Args, Positional->Kind, &Positional->Value, &Error);
+          if (!Error.Kind) Positional->Set = 1;
+          Positional = Positional->Next;
+        } else 
+        {
+          Error.UnexpectedValue = Value;
+          Error.Kind = CliErrorUnexpectedValue;
+        };
+      } else if (Token == CliTokenFlag || Token == CliTokenAlias)
+      {
+        cli_opt* Opt = 0;
+        cli_arg* Arg = 0;
+        if ((Arg = CliArgSearch(Command->KHead, Value)))
+        {
+          Error.NotEnoughValues = Arg;
+          
+          if (Arg->Count == 1) Error.Kind = CliLexerRead1(&Args, Arg->Kind, &Arg->Value, &Error);
+          else if (Arg->Count) Error.Kind = CliLexerReadN(&Args, Arg->Kind, Arg->Count, &Arg->Value, &Error);
+          else Error.Kind = CliLexerReadX(&Args, Arg->Kind, &Arg->Value, &Error);
+          if (!Error.Kind) Arg->Set = 1;
+        } else if ((Opt = CliOptSearch(Command->OHead, Cli->OHead, Value)))
+        {
+          *Opt->Value = 1;
+          if (Opt->Name.Value[0] == '!')
+          {
+            Token = CliTokenEof;
+            ConfirmAllSet = 0;
+            break;
+          };          
+        } else 
+        {
+          Error.Kind = CliErrorUnkownOption;
+        };
+      } else if (Token == CliTokenFlagValue)
+      {
+        cli_arg* Arg = CliArgSearch(Command->KHead, Value);
+        Error.NotEnoughValues = Arg;
+        
+        if (!Arg) Error.Kind = CliErrorUnkownOption;
+        else if (Arg->Count == 1) Error.Kind = CliLexerRead1(&Args, Arg->Kind, &Arg->Value, &Error);
+        else Error.Kind = CliErrorNotEnoughValues;
+          if (!Error.Kind) Arg->Set = 1;
+      } else if (Token == CliTokenAliasValue)
+      {
+        u32 Stop = 0;
+        Error.Kind = CliResolveBatchedAlias(Value, Command->OHead, Cli->OHead, Command->KHead, &Error, &Stop);
+
+        if (Stop)
+        {
+          Token = CliTokenEof;
+          ConfirmAllSet = 0;
+          break;
+        };
+      };
+    };
+
+    // Check whether all were set
+    
+    if (ConfirmAllSet)
+    {
+      for (cli_arg* Node = Error.Kind? 0 : Command->AHead; Node; Node = Node->Next)
+      {
+        if (Node->Required && !Node->Set)
+        {
+          Error.RequiredArg = Node;
+          Error.Kind = CliErrorRequiredArgument;
+          break;
+        };
+      };
+
+      for (cli_arg* Node = Error.Kind? 0 : Command->KHead; Node; Node = Node->Next)
+      {
+        if (Node->Required && !Node->Set)
+        {
+          Error.RequiredArg = Node;
+          Error.Kind = CliErrorRequiredArgument;
+          break;
+        };
+      };
+    };
+  } else if (!Command && Token != CliTokenEof)
+  {
+    Error.Kind = CliErrorExpectedCommandName;
+  };
+  Cli->Current = Command;
   return Error;
 };
