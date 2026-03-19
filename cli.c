@@ -516,7 +516,7 @@ CliMake(const char* Name, const char* Desc)
 {
   cli_arena* Arena = CliArenaMake(20<<10);
   cli* Cli = CliArenaZPush(Arena, sizeof(*Cli));
-
+  
   if (Cli)
   {
     Cli->Arena = Arena;
@@ -541,7 +541,7 @@ CliCommand(cli* Cli, u32* Called, const char* Name, const char* Desc)
   if (!Cli || !Called || !Name || Desc) return;
   cli_cmd* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
   if (!Node) return;
-
+  
   Node->Name = CliStrC(Name, Cli->Arena);
   Node->Desc = CliStrC(Desc, Cli->Arena);
   Node->Called = Called;
@@ -557,12 +557,12 @@ CliMain(cli* Cli, u32* Called, const char* Name, const char* Desc)
   Node->Name = CliStrC(Name, Cli->Arena);
   Node->Desc = CliStrC(Desc, Cli->Arena);
   Node->Called = Called;
-
+  
   if (Name && *Name)
   {
     CliDLLPush(Cli, Node, CHead, CTail);
   };
-
+  
   Cli->Default = Node;
 };
 
@@ -570,13 +570,13 @@ void
 CliOption(cli* Cli, u32* Value, const char* Name, const char* Desc)
 {
   if (!Cli || !Value || !Name || !Desc) return;
-
+  
   cli_opt* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
   if (!Node) return;
   Node->Name = CliStrC(Name, Cli->Arena);
   Node->Desc = CliStrC(Desc, Cli->Arena);
   Node->Value = Value;
-
+  
   if (Cli->CTail)
   {
     CliDLLPush(Cli->CTail, Node, OHead, OTail);
@@ -591,10 +591,10 @@ CliPushArg(cli* Cli, const char* Name, const char* Desc, cli_value Value, u16 Ki
 {
   if (!Cli || !Cli->CTail && !Cli->Default || !Name || !Desc) return;
   cli_cmd* Parent = Cli->CTail ? Cli->CTail : Cli->Default;
-
+  
   cli_arg* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
   if (!Node) return;
-
+  
   int IsPositional = Name[0] == '*';
   Node->Name = CliStrC(IsPositional ? Name + 1 : Name, Cli->Arena);
   Node->Desc = CliStrC(Desc, Cli->Arena);
@@ -603,7 +603,7 @@ CliPushArg(cli* Cli, const char* Name, const char* Desc, cli_value Value, u16 Ki
   Node->Value = Value;
   Node->Count = Count;
   Node->Kind = Kind;
-
+  
   if (IsPositional)
   {
     CliDLLPush(Parent, Node, AHead, ATail);
@@ -1172,17 +1172,17 @@ enum
 #if 0
 const char* _CliErrorName[] =
 {
-  
-  [CliErrorNone] = "CliErrorNone",
-  [CliErrorParsing] = "CliErrorParsing",
-  [CliErrorMissingValue] = "CliErrorMissingValue",
-  [CliErrorNotEnoughValues] = "CliErrorNotEnoughValues",
-  [CliErrorUnkownOption] = "CliErrorUnkownOption",
-  [CliErrorExpectedCommandName] = "CliErrorExpectedCommandName",
-  [CliErrorUnexpectedValue] = "CliErrorUnexpectedValue",
-  [CliErrorArgumentDoesNotExpectValue] = "CliErrorArgumentDoesNotExpectValue",
-  [CliErrorUknownCommand] = "CliErrorUknownCommand",
-  [CliErrorRequiredArgument] = "CliErrorRequiredArgument",
+
+[CliErrorNone] = "CliErrorNone",
+[CliErrorParsing] = "CliErrorParsing",
+[CliErrorMissingValue] = "CliErrorMissingValue",
+[CliErrorNotEnoughValues] = "CliErrorNotEnoughValues",
+[CliErrorUnkownOption] = "CliErrorUnkownOption",
+[CliErrorExpectedCommandName] = "CliErrorExpectedCommandName",
+[CliErrorUnexpectedValue] = "CliErrorUnexpectedValue",
+[CliErrorArgumentDoesNotExpectValue] = "CliErrorArgumentDoesNotExpectValue",
+[CliErrorUknownCommand] = "CliErrorUknownCommand",
+[CliErrorRequiredArgument] = "CliErrorRequiredArgument",
 };
 #endif
 
@@ -1401,3 +1401,135 @@ CliLexerNextFunction(cli_lexer* Args)
   return CliLexerShouldSkipAll(Args) ? CliLexerNextAll : CliLexerNextEscaped;
 };
 
+static usize
+CliSizeof(u16 Kind)
+{
+  if (Kind == CliValueInt) return sizeof(i64);
+  else if (Kind == CliValueFloat) return sizeof(double);
+  else return sizeof(const char*);
+};
+
+static usize // Count the values upto the next flag
+CliLexerPeekLength(cli_lexer* Args)
+{
+  usize Count = 0;
+  u32 Token = 0;
+  cli_str Value = {0};
+  
+  usize Index = Args->Index;
+  
+  cli_lexer_next* NextF = CliLexerNextFunction(Args);
+  
+  while (NextF(Args, &Token, &Value) && Token == CliTokenValue)
+  {
+    Count++;
+  };
+  Args->Index = Index;
+  return Count;
+};
+
+static u32 // Read a single value
+CliLexerRead1(cli_lexer* Args, u16 Kind, cli_value* Out, cli_error_cursor* ErrorP)
+{
+  cli_str Source = {0};
+  u32 Token = 0;
+  cli_value Value = {0};
+  u32 Error = 0;
+  
+  CliLexerNextEscaped(Args, &Token, &Source);
+  
+  if (Token == CliTokenValue) Error = CliParseValue(Source, Kind, Out, ErrorP);
+  else Error = CliErrorMissingValue;
+  
+  ErrorP->Kind = Error;
+  ErrorP->Parsing = Source;
+  return Error;  
+};
+
+static u32  // Read an array of values
+CliLexerRead(cli_lexer* Args, u16 Kind, void* Array, usize Count, cli_error_cursor* ErrorP)
+{
+  cli_str Value = {0};
+  u32 Token = 0;  
+  usize i = 0;
+  
+  cli_lexer_next* NextF = CliLexerNextFunction(Args);
+  u32 Error = 0;
+  
+  while (i < Count && !Error)
+  {
+    if (!NextF(Args, &Token, &Value) || Token != CliTokenValue)
+    {
+      Error = CliErrorNotEnoughValues;
+    } else if (Kind == CliValueFloat)
+    {
+      double* A = Array;
+      Error = CliParseType(Value, Kind, A + (i++), ErrorP);
+      
+    } else if (Kind == CliValueInt)
+    {
+      i64* A = Array;
+      Error = CliParseType(Value, Kind, A + (i++), ErrorP);
+    } else 
+    {
+      const char** A = Array;
+      A[i++] = (const char*)Value.Value;
+    };
+  };
+  
+  ErrorP->Kind = Error;
+  ErrorP->ExpectedCount = Count;
+  ErrorP->GotCount = i;
+  return Error;
+};
+
+static u32 // Read a fixed number of values
+CliLexerReadN(cli_lexer* Args, u16 Kind, usize Count, cli_value* Value, cli_error_cursor* ErrorP)
+{
+  CliFree(Value->LFloat);
+  
+  void* Array = CliMalloc(CliSizeof(Kind) * Count);
+  assert(Array);
+  
+  u32 Error = CliLexerRead(Args, Kind, Array, Count, ErrorP);
+  
+  if (Error)
+  {
+    CliFree(Array);
+    Array = 0;
+    Count = 0;
+  };
+  
+  *Value->LFloat = Array;
+  *Value->Length = Count;
+  return Error;
+};
+
+static u32 // Read all until a flag is encountered.
+CliLexerReadX(cli_lexer* Args, u16 Kind, cli_value* Value, cli_error_cursor* ErrorP)
+{
+  CliFree(Value->LFloat);
+  usize Count = CliLexerPeekLength(Args);
+  
+  if (!Count)
+  {
+    return CliErrorNotEnoughValues;
+  };
+  
+  void* Array = CliMalloc(Count * CliSizeof(Kind));
+  assert(Array);
+  
+  u32 Error = CliLexerRead(Args, Kind, Array, Count, ErrorP);
+  
+  if (Error) 
+  {
+    CliFree(Array);
+    Array = 0;
+    Count = 0;
+  };
+  
+  *Value->LFloat = Array;
+  *Value->Length = Count;
+  
+  return Error;
+};
