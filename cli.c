@@ -1148,7 +1148,7 @@ CliOptSearch(cli_opt* Head1, cli_opt* Head2, cli_str Flag)
 };
 
 static cli_arg*
-CliArgSearch(cli_arg* Head, cli_str Flag)
+CliLexerearch(cli_arg* Head, cli_str Flag)
 {
   CliSearchNodes(Head, Flag);
   return 0;
@@ -1235,3 +1235,169 @@ CliParseValue(cli_str Source, u16 Type, cli_value* Out, cli_error_cursor* ErrorP
   ErrorP->Parsing = Source;
   return Error;
 };
+
+// Tokenizing the arguments
+enum
+{
+  CliTokenEof,
+  CliTokenFlag, // --<flag> 
+  CliTokenAlias, // -<alias>
+  CliTokenFlagValue, // --<flag>=<value> or --<flag>:<value>
+  CliTokenAliasValue, // -<alias><value>
+  CliTokenValue, // Anything not prefixed with a hyphen
+  CliTokenEscape, // '--' Escapes anything with a hyphen so it's treated like a value.
+};
+
+typedef struct cli_lexer cli_lexer;
+struct cli_lexer
+{
+  const char** Values;
+  usize Count;
+  usize Index;
+  cli_str Partial;
+};
+
+static void // Extracts the value and the flag from a --flag:value or --flag=value.
+CliLexerUnpackFlag(const char* Value, cli_str* Flag, cli_str* Partial) 
+{
+  Value += 2;
+  usize i = 0;
+  usize k = 0;
+  u32 FoundMid = 0;
+  
+  while (Value[i])
+  {
+    u8 Ch = Value[i];
+    if (Ch == '=' || Ch == ':')
+    {
+      FoundMid = 1;
+      k = i;
+    };
+    i++;
+  };
+  
+  cli_str Long = {0}, Part = {0};
+  
+  if (FoundMid && k < i)
+  {
+    Long.Value = (u8*)(Value);
+    Long.Length = k;
+    Part.Value = Long.Value + (k + 1);
+    Part.Length = i - k - 1;
+  } else 
+  {
+    Long.Value = (u8*)(Value);
+    Long.Length = i;
+  };
+  *Flag = Long;
+  *Partial = Part;
+};
+
+static u32
+CliLexerNext(cli_lexer* Args, u32* Token, cli_str* Out, u32 Escape)
+{
+  *Token = CliTokenValue;
+  
+  if (Args->Partial.Value)
+  {
+    *Out = Args->Partial;
+    Args->Partial.Value = 0;
+    Args->Partial.Length = 0;
+    return 1;
+  };
+  
+  if (Args->Count <= Args->Index)
+  {
+    *Token = CliTokenEof;
+    return 0;
+  };
+  const char* Value = Args->Values[Args->Index++];
+  
+  if (Escape || Value[0] != '-') // Any value literal
+  {
+    *Out = CliStrK(Value);
+  } else if (Value[1] != '-') // -abcdefg : alias
+  {  
+    usize Length = CliStrLen(Value + 1);
+    *Token = Length == 0 ? CliTokenValue : Length == 1 ? CliTokenAlias : CliTokenAliasValue;
+    cli_str F = {(u8*)(Value + 1), Length};
+    *Out = F;
+  } else if (Value[2] == 0) // '--' Escaping 
+  {
+    *Token = CliTokenEscape;
+  } else // '--flag' / '--flag:value'
+  {
+    CliLexerUnpackFlag(Value, Out, &Args->Partial);
+    *Token = Args->Partial.Length ? CliTokenFlagValue : CliTokenFlag;
+  };
+  return 1;
+};
+
+static u32 // Skip the escape token
+CliLexerNextEscaped(cli_lexer* Args, u32* Token, cli_str* Out)
+{
+  u32 T = 0;
+  u32 Escape = 0;
+  cli_str Temp = {0};
+  Start:
+  u32 Ok = CliLexerNext(Args, &T, &Temp, Escape);
+  if (!Escape && T == CliTokenEscape)
+  {
+    Escape = 1;
+    goto Start;
+  };
+  
+  *Out = Temp;
+  *Token = T;
+  return Ok;
+};
+
+static u32 // Treat everything from the current position onwards as values.
+CliLexerNextAll(cli_lexer* Args, u32* Token, cli_str* Out)
+{
+  u32 T = 0;
+  return CliLexerNext(Args, &T, Out, 1);
+};
+
+static void
+CliLexerRollback(cli_lexer* Args)
+{
+  Args->Partial.Value = 0;
+  Args->Partial.Length = 0;
+  
+  if (1 < Args->Index) Args->Index--;
+};
+
+static void
+CliLexerRollbackTo(cli_lexer* Args, usize Index)
+{
+  Args->Partial.Value = 0;
+  Args->Partial.Length = 0;
+  if (1 < Index && Index < Args->Count) Args->Index = Index;
+};
+
+// If an argument takes in more than one argument and the escape token 
+// occurs first, everything else is considered a value
+// e.g. --expression -- 12 - -3 as opposed to --expression 12 -- - -- -3
+static u32 
+CliLexerShouldSkipAll(cli_lexer* Args)
+{
+  cli_str Temp;
+  u32 Token = 0;
+  if (CliLexerNext(Args, &Token, &Temp, 0))
+  {
+    if (Token == CliTokenEscape) return 1;
+    CliLexerRollback(Args);
+  };
+  return 0;
+};
+
+typedef u32
+cli_lexer_next(cli_lexer* Args, u32* Token, cli_str* Out);
+
+static cli_lexer_next*
+CliLexerNextFunction(cli_lexer* Args)
+{
+  return CliLexerShouldSkipAll(Args) ? CliLexerNextAll : CliLexerNextEscaped;
+};
+
