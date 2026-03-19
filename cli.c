@@ -604,6 +604,7 @@ CliOption(cli* Cli, u32* Value, const char* Name, const char* Desc)
   Node->Name = CliStrC(Name, Cli->Arena);
   Node->Desc = CliStrC(Desc, Cli->Arena);
   Node->Value = Value;
+  *Value = 0;
   
   u8 Short = 0;
   cli_str Long = CliExpandName(Node->Name, &Short);
@@ -1632,6 +1633,7 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
   u32 Token = 0;
   cli_str Value = {0};
   cli_cmd* Command = Cli->Default; // Fall back
+  u32 Stop = 0;
   
   
   while (!Error.Kind && CliLexerNext(&Args, &Token, &Value, 0))
@@ -1651,7 +1653,6 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
       break; 
     } else if (Token == CliTokenAliasValue)
     {
-      u32 Stop = 0;
       Error.Kind = CliResolveBatchedAlias(Value, Cli->OHead, 0, 0, &Error, &Stop);
       
       if (Command && Error.Kind ==CliErrorUnkownOption)
@@ -1660,11 +1661,8 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         Error.Kind = 0;
         break;
       };
-      if (Stop)
-      {
-        Token = CliTokenEof;
-        break;
-      };
+      if (Stop) break;
+
     } else if (Token == CliTokenAlias || Token == CliTokenFlag)
     {
       cli_opt* Opt = CliOptSearch(Cli->OHead, 0, Value);
@@ -1673,7 +1671,7 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         *Opt->Value = 1;
         if (Opt->Name.Value[0] == '!')
         {
-          Token = CliTokenEof;
+          Stop = 1;
           break;
         };
       };
@@ -1690,10 +1688,9 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
     };
   };
   
-  if (!Error.Kind && Command)
+  if (!Stop && !Error.Kind && Command)
   {
     cli_arg* Positional = Command->AHead;
-    u32 ConfirmAllSet = 1;
     while (!Error.Kind && CliLexerNext(&Args, &Token, &Value, 0))
     {
       Error.UknownOption = Value;
@@ -1731,10 +1728,9 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
           *Opt->Value = 1;
           if (Opt->Name.Value[0] == '!')
           {
-            Token = CliTokenEof;
-            ConfirmAllSet = 0;
+            Stop = 1;
             break;
-          };          
+          };
         } else 
         {
           Error.Kind = CliErrorUnkownOption;
@@ -1753,18 +1749,13 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         u32 Stop = 0;
         Error.Kind = CliResolveBatchedAlias(Value, Command->OHead, Cli->OHead, Command->KHead, &Error, &Stop);
         
-        if (Stop)
-        {
-          Token = CliTokenEof;
-          ConfirmAllSet = 0;
-          break;
-        };
+        if (Stop) break;
       };
     };
     
     // Check whether all were set
     
-    if (ConfirmAllSet)
+    if (!Stop)
     {
       for (cli_arg* Node = Error.Kind? 0 : Command->AHead; Node; Node = Node->Next)
       {
@@ -1786,10 +1777,11 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         };
       };
     };
-  } else if (!Command && Token != CliTokenEof)
+  } else if (!Stop && !Command && Token != CliTokenEof)
   {
     Error.Kind = CliErrorExpectedCommandName;
   };
+
   Cli->Current = Command;
   return Error;
 };
@@ -1802,7 +1794,7 @@ CliParse(cli* Cli, const char** Argv, u32 Length)
   Cli->Error = CliLexerParse(Cli, Argv, Length);
   Cli->Argv = Argv;
   Cli->Count = Length;
-  return !!Cli->Error.Kind;
+  return !Cli->Error.Kind;
 };
 
 // Writer interface
@@ -1855,7 +1847,7 @@ CliPuts(cli_writeable Out, const u8* Value, usize Length)
     usize i = 0;
     while (i < Length)
     {
-      usize Advance = CliCharUtf8Advance(Value[0]);
+      usize Advance = CliCharUtf8Advance(Value[i]);
       u32 Char = 0;
       if (!Advance || Length < i + Advance)
       {
@@ -1865,6 +1857,7 @@ CliPuts(cli_writeable Out, const u8* Value, usize Length)
       {
         Char = CliCharUtf8Decode(Value + i);
       };
+      Out.Callback(Out.This, Char);
       i += Advance;
     };
   };
@@ -2028,7 +2021,7 @@ CliWriteHelp(cli_writeable Out, cli* Cli, usize Client)
   
   Client = CliMax(Client, Cli->Indentation + 10);
   
-  if (Cli->Current)
+  if (Cli->Current && Cli->Current != Cli->Default)
   {
     cli_cmd* Node = Cli->Current;
     CliPuts(Out, Node->Desc.Value, Node->Desc.Length);
@@ -2296,7 +2289,6 @@ CliWriteError(cli* Cli, cli_writeable Out)
   {
     default: return;
 
-    CliPutcs(Out, "Error: ");
 
     // Excruciatingly painful string writing. Would use printf but I want libc to be opt-in
     // and it would not work with the writer interface without requiring every single 
@@ -2304,24 +2296,27 @@ CliWriteError(cli* Cli, cli_writeable Out)
 
     case CliErrorParsing:
     {
+      CliPutcs(Out, "Error: ");
       CliPutcs(Out, "Could not parse `");
       CliPuts(Out, Cli->Error.Parsing.Value, Cli->Error.Parsing.Length);
       CliPutcs(Out, " `.");
     } break;
     case CliErrorMissingValue:
     {
+      CliPutcs(Out, "Error: ");
       cli_str Name = Cli->Error.MissingValue->Name;
-      CliPutcs(Out, "Missing value for argument `");
+      CliPutcs(Out, "Missing value for argument `--");
       CliPuts(Out, Name.Value, Name.Length);
       CliPutcs(Out, " `.");
     } break;
     case CliErrorNotEnoughValues:
     {
+      CliPutcs(Out, "Error: ");
       u8 Short = 0;
       cli_str Name = CliExpandName(Cli->Error.NotEnoughValues->Name, &Short);
       usize Expected = Cli->Error.ExpectedCount;
       usize Got = Cli->Error.GotCount;
-      CliPutcs(Out, "Argument `");
+      CliPutcs(Out, "Argument `--");
       CliPuts(Out, Name.Value, Name.Length);
       CliPutcs(Out, "` Expected ");
       CliPutUsize(Out, Expected);
@@ -2331,6 +2326,7 @@ CliWriteError(cli* Cli, cli_writeable Out)
     } break;
     case CliErrorUnkownOption:
     {
+      CliPutcs(Out, "Error: ");
       cli_str Name = Cli->Error.UknownOption;
       CliPutcs(Out, "Uknown option `");
       CliPuts(Out, Name.Value, Name.Length);
@@ -2338,10 +2334,12 @@ CliWriteError(cli* Cli, cli_writeable Out)
     } break;
     case CliErrorExpectedCommandName:
     {
+      CliPutcs(Out, "Error: ");
       CliPutcs(Out, "Expected command name.");
     } break;
     case CliErrorUnexpectedValue:
     {
+      CliPutcs(Out, "Error: ");
       cli_str Name = Cli->Error.UnexpectedValue;
       CliPutcs(Out, "`");
       CliPuts(Out, Name.Value, Name.Length);
@@ -2349,14 +2347,16 @@ CliWriteError(cli* Cli, cli_writeable Out)
     } break;
     case CliErrorArgumentDoesNotExpectValue:
     {
+      CliPutcs(Out, "Error: ");
       u8 Short = 0;
       cli_str Name = CliExpandName(Cli->Error.ArgumentDoesNotExpectValue->Name, &Short);
-      CliPutcs(Out, "Argument `");
+      CliPutcs(Out, "Argument `--");
       CliPuts(Out, Name.Value, Name.Length);
       CliPutcs(Out, " ` does not require any value.");
     } break;
     case CliErrorUknownCommand:
     {
+      CliPutcs(Out, "Error: ");
       u8 Short = 0;
       cli_str Name = CliExpandName(Cli->Error.UknownCommand, &Short);
       CliPutcs(Out, "Uknown command `");
@@ -2365,9 +2365,10 @@ CliWriteError(cli* Cli, cli_writeable Out)
     } break;
     case CliErrorRequiredArgument:
     {
+      CliPutcs(Out, "Error: ");
       u8 Short = 0;
-      cli_str Name = CliExpandName(Cli->Error.UknownCommand, &Short);
-      CliPutcs(Out, "Required argument `");
+      cli_str Name = CliExpandName(Cli->Error.RequiredArg->Name, &Short);
+      CliPutcs(Out, "Required argument `--");
       CliPuts(Out, Name.Value, Name.Length);
       CliPutcs(Out, "` did not recieve any value.");
     } break;
