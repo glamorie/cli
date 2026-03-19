@@ -43,13 +43,19 @@ CliParse(cli* Cli, const char** Argv, u32 Length);
 const char*
 CliErrorAsString(cli* Cli, size_t* Length, usize ConsoleWidth);
 
+u16*
+CliErrorAsString16(cli* Cli, size_t* Length, usize ConsoleWidth);
+
 void
 CliErrorWrite(cli* Cli, cli_file_t File, usize ConsoleWidth);
 
 const char*
 CliHelpAsString(cli* Cli, size_t* Length, usize ConsoleWidth);
 
-const char*
+u16*
+CliHelpAsString17(cli* Cli, size_t* Length, usize ConsoleWidth);
+
+void
 CliHelpWrite(cli* Cli, cli_file_t File, usize ConsoleWidth);
 
 void
