@@ -37,8 +37,8 @@ CliMake(const char* Name, const char* Desc);
 void
 CliTake(cli* Cli);
 
-int
-CliParse(cli* Cli, const char** Argv, int Length);
+u32
+CliParse(cli* Cli, const char** Argv, u32 Length);
 
 const char*
 CliErrorAsString(cli* Cli, size_t* Length);
@@ -53,13 +53,13 @@ const char*
 CliHelpWrite(cli* Cli, cli_file_t File);
 
 void
-CliCommand(cli* Cli, int* Called, const char* Name, const char* Desc);
+CliCommand(cli* Cli, u32* Called, const char* Name, const char* Desc);
 
 void
-CliMain(cli* Cli, int* Called, const char* Name, const char* Desc);
+CliMain(cli* Cli, u32* Called, const char* Name, const char* Desc);
 
 void
-CliOption(cli* Cli, int* Value, const char* Name, const char* Desc);
+CliOption(cli* Cli, u32* Value, const char* Name, const char* Desc);
 
 void
 CliInt(cli* Cli, i64* Value, const char* Name, const char* Desc);
@@ -80,12 +80,12 @@ void
 CliStrOr(cli* Cli, const char** Value, const char* Default, const char* Name, const char* Desc);
 
 void
-CliIntN(cli* Cli, i64** Value, int* Length, int Count, const char* Name, const char* Desc);
+CliIntN(cli* Cli, i64** Value, usize* Length, usize Count, const char* Name, const char* Desc);
 
 void
-CliFloatN(cli* Cli, double** Value, int* Length, int Count, const char* Name, const char* Desc);
+CliFloatN(cli* Cli, double** Value, usize* Length, usize Count, const char* Name, const char* Desc);
 
 void
-CliStrN(cli* Cli, const char** Value, int* Length, int Count, const char* Name, const char* Desc);
+CliStrN(cli* Cli, const char** Value, usize* Length, usize Count, const char* Name, const char* Desc);
 
 #endif /* CMD_H*/
