@@ -41,16 +41,16 @@ u32
 CliParse(cli* Cli, const char** Argv, u32 Length);
 
 const char*
-CliErrorAsString(cli* Cli, size_t* Length);
+CliErrorAsString(cli* Cli, size_t* Length, usize ConsoleWidth);
 
 void
-CliErrorWrite(cli* Cli, cli_file_t File);
+CliErrorWrite(cli* Cli, cli_file_t File, usize ConsoleWidth);
 
 const char*
-CliHelpAsString(cli* Cli, size_t* Length);
+CliHelpAsString(cli* Cli, size_t* Length, usize ConsoleWidth);
 
 const char*
-CliHelpWrite(cli* Cli, cli_file_t File);
+CliHelpWrite(cli* Cli, cli_file_t File, usize ConsoleWidth);
 
 void
 CliCommand(cli* Cli, u32* Called, const char* Name, const char* Desc);
