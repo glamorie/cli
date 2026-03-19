@@ -53,7 +53,7 @@ const char*
 CliHelpAsString(cli* Cli, size_t* Length, usize ConsoleWidth);
 
 u16*
-CliHelpAsString17(cli* Cli, size_t* Length, usize ConsoleWidth);
+CliHelpAsString18(cli* Cli, size_t* Length, usize ConsoleWidth);
 
 void
 CliHelpWrite(cli* Cli, cli_file_t File, usize ConsoleWidth);
