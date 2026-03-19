@@ -2260,3 +2260,179 @@ CliHelpAsString16(cli* Cli, size_t* Length, usize ConsoleWidth)
   };
   return String;
 };
+
+// Error logging
+
+static void
+CliPutUsize(cli_writeable Out, usize Value)
+{
+  if (Out.Callback)
+  {
+    u8 Buffer[0x30];
+    usize C = sizeof(Buffer);
+    usize i = 0;
+
+    if (Value == 0) Buffer[i++] = '0';
+
+    while (Value > 0)
+    {
+      Buffer[i++] = (Value % 10) + '0';
+      Value /= 10;
+    };
+
+    for (usize k = 0; k < i; k++)
+    {
+      Out.Callback(Out.This, Buffer[i - k - 1]);
+    };
+  };
+};
+
+static void
+CliWriteError(cli* Cli, cli_writeable Out)
+{
+  if (!Cli) return;
+
+  switch (Cli->Error.Kind)
+  {
+    default: return;
+
+    CliPutcs(Out, "Error: ");
+
+    // Excruciatingly painful string writing. Would use printf but I want libc to be opt-in
+    // and it would not work with the writer interface without requiring every single 
+    // implimentation to write it's own vsprintf function.
+
+    case CliErrorParsing:
+    {
+      CliPutcs(Out, "Could not parse `");
+      CliPuts(Out, Cli->Error.Parsing.Value, Cli->Error.Parsing.Length);
+      CliPutcs(Out, " `.");
+    } break;
+    case CliErrorMissingValue:
+    {
+      cli_str Name = Cli->Error.MissingValue->Name;
+      CliPutcs(Out, "Missing value for argument `");
+      CliPuts(Out, Name.Value, Name.Length);
+      CliPutcs(Out, " `.");
+    } break;
+    case CliErrorNotEnoughValues:
+    {
+      u8 Short = 0;
+      cli_str Name = CliExpandName(Cli->Error.NotEnoughValues->Name, &Short);
+      usize Expected = Cli->Error.ExpectedCount;
+      usize Got = Cli->Error.GotCount;
+      CliPutcs(Out, "Argument `");
+      CliPuts(Out, Name.Value, Name.Length);
+      CliPutcs(Out, "` Expected ");
+      CliPutUsize(Out, Expected);
+      CliPutcs(Out, " value(s) but recieved ");
+      CliPutUsize(Out, Expected);
+      CliPutcs(Out, " value(s) but recieved.");
+    } break;
+    case CliErrorUnkownOption:
+    {
+      cli_str Name = Cli->Error.UknownOption;
+      CliPutcs(Out, "Uknown option `");
+      CliPuts(Out, Name.Value, Name.Length);
+      CliPutcs(Out, " `.");
+    } break;
+    case CliErrorExpectedCommandName:
+    {
+      CliPutcs(Out, "Expected command name.");
+    } break;
+    case CliErrorUnexpectedValue:
+    {
+      cli_str Name = Cli->Error.UnexpectedValue;
+      CliPutcs(Out, "`");
+      CliPuts(Out, Name.Value, Name.Length);
+      CliPutcs(Out, " ` was unexpected.");
+    } break;
+    case CliErrorArgumentDoesNotExpectValue:
+    {
+      u8 Short = 0;
+      cli_str Name = CliExpandName(Cli->Error.ArgumentDoesNotExpectValue->Name, &Short);
+      CliPutcs(Out, "Argument `");
+      CliPuts(Out, Name.Value, Name.Length);
+      CliPutcs(Out, " ` does not require any value.");
+    } break;
+    case CliErrorUknownCommand:
+    {
+      u8 Short = 0;
+      cli_str Name = CliExpandName(Cli->Error.UknownCommand, &Short);
+      CliPutcs(Out, "Uknown command `");
+      CliPuts(Out, Name.Value, Name.Length);
+      CliPutcs(Out, " `.");
+    } break;
+    case CliErrorRequiredArgument:
+    {
+      u8 Short = 0;
+      cli_str Name = CliExpandName(Cli->Error.UknownCommand, &Short);
+      CliPutcs(Out, "Required argument `");
+      CliPuts(Out, Name.Value, Name.Length);
+      CliPutcs(Out, "` did not recieve any value.");
+    } break;
+  };
+  CliPutLine(Out);
+  CliPutLine(Out);
+  CliPutcs(Out, "Try  : ");
+  CliPutcs(Out, Cli->Argv[0]);
+  CliPutcs(Out, " --help");
+  CliPutLine(Out);
+};
+
+const char*
+CliErrorAsString(cli* Cli, size_t* Length)
+{
+  const char* String = 0;
+  usize L = 0;
+
+  if (Cli)
+  {
+    usize Position = CliArenaPosition(Cli->Arena);
+    cli_sb Buffer = {0};
+    Buffer.Arena = Cli->Arena;
+    Buffer.ChunkSize = 2<<10;
+    cli_writeable Out;
+    Out.Callback = CliSb_Write;
+    Out.This = &Buffer;
+    CliWriteError(Cli, Out);
+    String = (const char*)CliSbRead8(&Buffer, &L);
+    CliArenaPopTo(Cli->Arena, Position);
+  };
+  if (Length) *Length = L;
+  return String;
+};
+
+u16*
+CliErrorAsString16(cli* Cli, size_t* Length)
+{
+  u16* String = 0;
+  usize L = 0;
+
+  if (Cli)
+  {
+    usize Position = CliArenaPosition(Cli->Arena);
+    cli_sb Buffer = {0};
+    Buffer.Arena = Cli->Arena;
+    Buffer.ChunkSize = 4<<10;
+    cli_writeable Out;
+    Out.Callback = CliSb_Write16;
+    Out.This = &Buffer;
+    CliWriteError(Cli, Out);
+    String = CliSbRead16(&Buffer, &L);
+    CliArenaPopTo(Cli->Arena, Position);
+  };
+  return String;
+};
+
+void
+CliErrorWrite(cli* Cli, cli_file_t File)
+{
+  if (!Cli) return;
+
+  cli_writeable Out;
+  Out.Callback = CliFile_Write;
+  Out.This = (void*)File;
+  CliWriteError(Cli, Out);
+  CliFileFlush(File);
+};
