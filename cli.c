@@ -1787,3 +1787,258 @@ CliParse(cli* Cli, const char** Argv, u32 Length)
   Cli->Count = Length;
   return !!Cli->Error.Kind;
 };
+
+// Writer interface
+
+typedef void cli_writer(void* This, u32 Char);
+
+typedef struct cli_writeable cli_writeable;
+struct cli_writeable
+{
+  cli_writer* Callback;
+  void* This;
+};
+
+static void
+CliPutChar(cli_writeable Out, u32 Char)
+{
+  if (Out.Callback) Out.Callback(Out.This, Char);
+};
+
+
+static void
+CliPutLine(cli_writeable Out)
+{
+  if (Out.Callback)
+  {
+    // TODO: Use the os specific line breaking
+    Out.Callback(Out.This, '\n');
+  };
+};
+
+static void
+CliPutCharN(cli_writeable Out, u32 Char, usize Count)
+{
+  if (Out.Callback)
+  {
+    for (usize i = 0; i < Count; i++)
+    {
+      Out.Callback(Out.This, Char);
+    };
+  };
+};
+
+static void
+CliPuts(cli_writeable Out, const u8* Value, usize Length)
+{
+  if (!Value) Length = 0;
+
+  if (Out.Callback)
+  {
+    usize i = 0;
+    while (i < Length)
+    {
+      usize Advance = CliCharUtf8Advance(Value[0]);
+      u32 Char = 0;
+      if (!Advance || Length < i + Advance)
+      {
+        Advance = 1;
+        Char = Value[i];
+      } else 
+      {
+        Char = CliCharUtf8Decode(Value + i);
+      };
+      i += Advance;
+    };
+  };
+};
+
+static void
+CliPutcs(cli_writeable Out, const char* Value)
+{
+  usize Length = CliStrLen(Value);
+
+  CliPuts(Out, (const u8*)Value, Length);
+};
+
+static void
+CliWriteIndentedText(cli_writeable Out, usize Indentation, usize Client, cli_str Desc)
+{
+  usize Space = Client - Indentation;
+  usize i = 0;
+  usize r = 0;
+  while (1)
+  {
+    while (i < Desc.Length && CliCharIsSpace(Desc.Value[i])) i++;
+    usize x = i;
+    while (i < Desc.Length && !CliCharIsSpace(Desc.Value[i])) i++;
+    usize L = i - x;
+    if (!L) break;
+    
+    if (Space < r + L + 1)
+    {
+      r = 0;
+      CliPutLine(Out);
+      CliPutCharN(Out, ' ', Indentation);
+    };
+    CliPuts(Out, Desc.Value + x, L);
+    CliPutChar(Out, ' ');
+    r += L + 1;
+  };
+  CliPutLine(Out);
+  CliPutLine(Out);
+};
+
+// Help message printing
+static void
+CliWriteFlagName(cli_writeable Out, cli_str Name, usize Indentation, usize Client)
+{
+  u8 Short = 0;
+  cli_str Long = CliExpandName(Name, &Short);
+  
+  if (Short)
+  {
+    CliPutCharN(Out, ' ', 2);
+    CliPutChar(Out, '-');
+    CliPutChar(Out, Short);
+    CliPutChar(Out, ',');
+  } else
+  {
+    CliPutCharN(Out, ' ', 5);
+  };
+  
+  CliPutCharN(Out, '-', 2);
+  CliPuts(Out, Long.Value, Long.Length);
+  CliPutCharN(Out, ' ', Indentation - Long.Length - 9 + 2);
+  
+};
+
+static void
+CliWriteArgName(cli_writeable Out, cli_str Name, usize Indentation, usize Client)
+{
+  CliPutCharN(Out, ' ', 2);
+  CliPuts(Out, Name.Value, Name.Length);
+  CliPutCharN(Out, ' ', Indentation - Name.Length - 4 + 2);
+  
+};
+
+static void
+CliWriteCmdName(cli_writeable Out, cli_str Name, usize Indentation, usize Client)
+{
+  u8 Short = 0;
+  cli_str Long = CliExpandName(Name, &Short);
+  
+  if (Short)
+  {
+    CliPutCharN(Out, ' ', 2);
+    CliPutChar(Out, Short);
+    CliPutChar(Out, '/');
+  } else
+  {
+    CliPutCharN(Out, ' ', 4);
+  };
+  CliPuts(Out, Long.Value, Long.Length);
+  CliPutCharN(Out, ' ', Indentation - Long.Length - 6 + 2);
+};
+
+static void
+CliWriteOptions(cli_writeable Out, cli_opt* Head, const char* Label, usize Indentation, usize Client)
+{
+  if (Head)
+  {
+    CliPutcs(Out, Label);
+    CliPutLine(Out);
+    for (cli_opt* Node = Head; Node; Node = Node->Next)
+    {
+      CliWriteFlagName(Out, Node->Name, Indentation, Client);
+      CliWriteIndentedText(Out, Indentation, Client, Node->Desc);
+    };
+  };
+  
+};
+
+static void
+CliWriteKwargs(cli_writeable Out, cli_arg* Head, const char* Label, usize Indentation, usize Client)
+{
+  if (Head)
+  {
+    CliPutcs(Out, Label);
+    CliPutLine(Out);
+    for (cli_arg* Node = Head; Node; Node = Node->Next)
+    {
+      CliWriteFlagName(Out, Node->Name, Indentation, Client);
+      CliWriteIndentedText(Out, Indentation, Client, Node->Desc);
+    };
+  };
+  
+};
+
+static void
+CliWriteArgs(cli_writeable Out, cli_arg* Head, const char* Label, usize Indentation, usize Client)
+{
+  if (Head)
+  {
+    CliPutcs(Out, Label);
+    CliPutLine(Out);
+    for (cli_arg* Node = Head; Node; Node = Node->Next)
+    {
+      CliWriteArgName(Out, Node->Name, Indentation, Client);
+      CliWriteIndentedText(Out, Indentation, Client, Node->Desc);
+    };
+    CliPutLine(Out);
+  };
+};
+
+static void
+CliWriteCommands(cli_writeable Out, cli_cmd* Head, const char* Label, usize Indentation, usize Client)
+{
+  if (Head)
+  {
+    CliPutcs(Out, Label);
+    CliPutLine(Out);
+    for (cli_cmd* Node = Head; Node; Node = Node->Next)
+    {
+      CliWriteCmdName(Out, Node->Name, Indentation, Client);
+      CliWriteIndentedText(Out, Indentation, Client, Node->Desc);
+    };
+  };
+};
+
+static void
+CliWriteHelp(cli_writeable Out, cli* Cli, usize Client)
+{
+  if (!Cli) return;
+  
+  Client = CliMax(Client, Cli->Indentation + 10);
+  
+  if (Cli->Current)
+  {
+    cli_cmd* Node = Cli->Current;
+    CliPuts(Out, Node->Desc.Value, Node->Desc.Length);
+    CliPutLine(Out);
+    CliPutLine(Out);
+    CliWriteArgs(Out, Node->AHead, "Positional: ", Cli->Indentation, Client);
+    CliWriteKwargs(Out, Node->KHead, "Arguments: ", Cli->Indentation, Client);
+    CliWriteOptions(Out, Node->OHead, "Options: ", Cli->Indentation, Client);
+    CliWriteOptions(Out, Cli->OHead, "Global Options: ", Cli->Indentation, Client);
+  } else 
+  {
+    CliPuts(Out, Cli->Name.Value, Cli->Name.Length);
+    CliPutLine(Out);
+    CliPutLine(Out);
+    CliPuts(Out, Cli->Desc.Value, Cli->Desc.Length);
+    CliPutLine(Out);
+    CliPutLine(Out);
+    
+    if (Cli->Default)
+    {
+      cli_cmd* Node = Cli->Default;
+      CliWriteArgs(Out, Node->AHead, "Positional: ", Cli->Indentation, Client);
+      CliWriteKwargs(Out, Node->KHead, "Arguments: ", Cli->Indentation, Client);
+      CliWriteOptions(Out, Node->OHead, "Options: ", Cli->Indentation, Client);
+    };
+    
+    CliWriteCommands(Out, Cli->CHead, "Commands: ", Cli->Indentation, Client);
+    CliWriteOptions(Out, Cli->OHead, "Global Options:", Cli->Indentation, Client);
+  };
+};
