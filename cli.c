@@ -535,6 +535,9 @@ CliTake(cli* Cli)
   };
 };
 
+static cli_str
+CliExpandName(cli_str Name, u8* Alias);
+
 void
 CliCommand(cli* Cli, u32* Called, const char* Name, const char* Desc)
 {
@@ -545,6 +548,10 @@ CliCommand(cli* Cli, u32* Called, const char* Name, const char* Desc)
   Node->Name = CliStrC(Name, Cli->Arena);
   Node->Desc = CliStrC(Desc, Cli->Arena);
   Node->Called = Called;
+  u8 Short = 0;
+  cli_str Long = CliExpandName(Node->Name, &Short);
+  usize Width = 4 + Long.Length + 4;
+  Cli->Indentation = CliMax(Cli->Indentation, Width);
   CliDLLPush(Cli, Node, CHead, CTail);
 };
 
@@ -560,6 +567,10 @@ CliMain(cli* Cli, u32* Called, const char* Name, const char* Desc)
   
   if (Name && *Name)
   {
+    u8 Short = 0;
+    cli_str Long = CliExpandName(Node->Name, &Short);
+    usize Width = 4 + Long.Length + 4;    
+    Cli->Indentation = CliMax(Cli->Indentation, Width);
     CliDLLPush(Cli, Node, CHead, CTail);
   };
   
@@ -577,6 +588,10 @@ CliOption(cli* Cli, u32* Value, const char* Name, const char* Desc)
   Node->Desc = CliStrC(Desc, Cli->Arena);
   Node->Value = Value;
   
+  u8 Short = 0;
+  cli_str Long = CliExpandName(Node->Name, &Short);
+  Cli->Indentation = CliMax(Cli->Indentation, Long.Length + 9);
+
   if (Cli->CTail)
   {
     CliDLLPush(Cli->CTail, Node, OHead, OTail);
@@ -606,9 +621,13 @@ CliPushArg(cli* Cli, const char* Name, const char* Desc, cli_value Value, u16 Ki
   
   if (IsPositional)
   {
+    Cli->Indentation = CliMax(Cli->Indentation, Node->Name.Length + 4); // [2][name][2]
     CliDLLPush(Parent, Node, AHead, ATail);
   } else 
   {
+    u8 Short = 0;
+    cli_str Long = CliExpandName(Node->Name, &Short);
+    Cli->Indentation = CliMax(Cli->Indentation, Long.Length + 9);
     CliDLLPush(Parent, Node, KHead, KTail);
   };
 };
@@ -1711,12 +1730,12 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         if (!Arg) Error.Kind = CliErrorUnkownOption;
         else if (Arg->Count == 1) Error.Kind = CliLexerRead1(&Args, Arg->Kind, &Arg->Value, &Error);
         else Error.Kind = CliErrorNotEnoughValues;
-          if (!Error.Kind) Arg->Set = 1;
+        if (!Error.Kind) Arg->Set = 1;
       } else if (Token == CliTokenAliasValue)
       {
         u32 Stop = 0;
         Error.Kind = CliResolveBatchedAlias(Value, Command->OHead, Cli->OHead, Command->KHead, &Error, &Stop);
-
+        
         if (Stop)
         {
           Token = CliTokenEof;
@@ -1725,7 +1744,7 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         };
       };
     };
-
+    
     // Check whether all were set
     
     if (ConfirmAllSet)
@@ -1739,7 +1758,7 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
           break;
         };
       };
-
+      
       for (cli_arg* Node = Error.Kind? 0 : Command->KHead; Node; Node = Node->Next)
       {
         if (Node->Required && !Node->Set)
