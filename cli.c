@@ -2,16 +2,6 @@
 #include <math.h>
 #include <assert.h>
 
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef int8_t i8;
-typedef int16_t i16;
-typedef int32_t i32;
-typedef int64_t i64;
-typedef size_t usize;
-
 // Utility functions
 
 #define CliDLLPush(Parent, Node, Head, Tail) \
@@ -416,18 +406,25 @@ CliStringCompareCaseInsensitive(cli_str s, cli_str Prefix)
 
 // Types
 
+enum
+{ // Basic types
+  CliValueString,
+  CliValueInt,
+  CliValueFloat,
+};
+
 typedef struct cli_value cli_value;
 struct cli_value
 {
-  usize Length;
+  usize* Length;
   union
   {
     i64* Number;
     double* Float;
     const char** String;
-    i64* LNumber;
-    double* LFloat;
-    const char** LString;
+    i64** LNumber;
+    double** LFloat;
+    const char*** LString;
   };
 };
 
@@ -439,9 +436,10 @@ struct cli_arg
   cli_str Name;
   cli_str Desc;
   cli_value Value;
-  u32 Count;
+  usize Count;
   u16 Kind;
-  u16 Set;
+  u8 Set;
+  u8 Required;
 };
 
 typedef struct cli_opt cli_opt;
@@ -451,7 +449,7 @@ struct cli_opt
   cli_opt* Next;
   cli_str Name;
   cli_str Desc;
-  u32 Value;
+  u32* Value;
 };
 
 typedef struct cli_cmd cli_cmd;
@@ -469,6 +467,7 @@ struct cli_cmd
   
   cli_opt* OHead;
   cli_opt* OTail;
+  u32* Called;
 };
 
 typedef struct cli_error_cursor cli_error_cursor;
@@ -509,4 +508,197 @@ struct cli
   u32 Frames;
   const char** Argv;
   usize Count;
+};
+
+// Building the cli nodes
+cli*
+CliMake(const char* Name, const char* Desc)
+{
+  cli_arena* Arena = CliArenaMake(20<<10);
+  cli* Cli = CliArenaZPush(Arena, sizeof(*Cli));
+
+  if (Cli)
+  {
+    Cli->Arena = Arena;
+    Cli->Name = CliStrC(Name, Arena);
+    Cli->Desc = CliStrC(Desc, Arena);
+  };
+  return Cli;
+};
+
+void
+CliTake(cli* Cli)
+{
+  if (Cli)
+  {
+    CliArenaTake(Cli->Arena);
+  };
+};
+
+void
+CliCommand(cli* Cli, u32* Called, const char* Name, const char* Desc)
+{
+  if (!Cli || !Called || !Name || Desc) return;
+  cli_cmd* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
+  if (!Node) return;
+
+  Node->Name = CliStrC(Name, Cli->Arena);
+  Node->Desc = CliStrC(Desc, Cli->Arena);
+  Node->Called = Called;
+  CliDLLPush(Cli, Node, CHead, CTail);
+};
+
+void
+CliMain(cli* Cli, u32* Called, const char* Name, const char* Desc)
+{
+  if (!Cli || !Called) return;
+  cli_cmd* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
+  if (!Node) return;
+  Node->Name = CliStrC(Name, Cli->Arena);
+  Node->Desc = CliStrC(Desc, Cli->Arena);
+  Node->Called = Called;
+
+  if (Name && *Name)
+  {
+    CliDLLPush(Cli, Node, CHead, CTail);
+  };
+
+  Cli->Default = Node;
+};
+
+void
+CliOption(cli* Cli, u32* Value, const char* Name, const char* Desc)
+{
+  if (!Cli || !Value || !Name || !Desc) return;
+
+  cli_opt* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
+  if (!Node) return;
+  Node->Name = CliStrC(Name, Cli->Arena);
+  Node->Desc = CliStrC(Desc, Cli->Arena);
+  Node->Value = Value;
+
+  if (Cli->CTail)
+  {
+    CliDLLPush(Cli->CTail, Node, OHead, OTail);
+  } else 
+  {
+    CliDLLPush(Cli, Node, OHead, OTail);
+  };
+};
+
+static void
+CliPushArg(cli* Cli, const char* Name, const char* Desc, cli_value Value, u16 Kind, usize Count, u8 Required)
+{
+  if (!Cli || !Cli->CTail && !Cli->Default || !Name || !Desc) return;
+  cli_cmd* Parent = Cli->CTail ? Cli->CTail : Cli->Default;
+
+  cli_arg* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
+  if (!Node) return;
+
+  int IsPositional = Name[0] == '*';
+  Node->Name = CliStrC(IsPositional ? Name + 1 : Name, Cli->Arena);
+  Node->Desc = CliStrC(Desc, Cli->Arena);
+  Node->Value = Value;
+  Node->Required = Required;
+  Node->Value = Value;
+  Node->Count = Count;
+  Node->Kind = Kind;
+
+  if (IsPositional)
+  {
+    CliDLLPush(Parent, Node, AHead, ATail);
+  } else 
+  {
+    CliDLLPush(Parent, Node, KHead, KTail);
+  };
+};
+
+void
+CliInt(cli* Cli, i64* Value, const char* Name, const char* Desc)
+{
+  cli_value In = {0};
+  In.Number = Value;
+  CliPushArg(Cli, Name, Desc, In, CliValueInt, 1, 1);
+};
+
+void
+CliFloat(cli* Cli, double* Value, const char* Name, const char* Desc)
+{
+  cli_value In = {0};
+  In.Float = Value;
+  CliPushArg(Cli, Name, Desc, In, CliValueFloat, 1, 1);
+};
+
+void
+CliStr(cli* Cli, const char** Value, const char* Name, const char* Desc)
+{
+  cli_value In = {0};
+  In.String = Value;
+  CliPushArg(Cli, Name, Desc, In, CliValueString, 1, 1);
+};
+
+void
+CliIntOr(cli* Cli, i64* Value, i64 Default, const char* Name, const char* Desc)
+{
+  if (!Value) return;
+  cli_value In = {0};
+  In.Number = Value;
+  *Value = Default;
+  CliPushArg(Cli, Name, Desc, In, CliValueInt, 1, 0);
+};
+
+void
+CliFloatOr(cli* Cli, double* Value, double Default, const char* Name, const char* Desc)
+{
+  if (!Value) return;
+  cli_value In = {0};
+  In.Float = Value;
+  *Value = Default;
+  CliPushArg(Cli, Name, Desc, In, CliValueFloat, 1, 0);
+};
+
+void
+CliStrOr(cli* Cli, const char** Value, const char* Default, const char* Name, const char* Desc)
+{
+  if (!Value) return;
+  cli_value In = {0};
+  In.String = Value;
+  *Value = Default;
+  CliPushArg(Cli, Name, Desc, In, CliValueString, 1, 0);
+};
+
+void
+CliIntN(cli* Cli, i64** Value, usize* Length, usize Count, const char* Name, const char* Desc)
+{
+  if (!Value || !Length || !Value) return;
+  u8 Required = *Name != '?';
+  cli_value In = {0};
+  In.Length = Length;
+  In.LNumber = Value;
+  if (!Required) *Value = 0, *Length = 0;
+  CliPushArg(Cli, Name, Desc, In, CliValueInt, Count, Required);
+};
+
+void
+CliFloatN(cli* Cli, double** Value, usize* Length, usize Count, const char* Name, const char* Desc)
+{
+  if (!Value || !Length || !Value) return;
+  u8 Required = *Name != '?';
+  cli_value In = {0};
+  In.Length = Length;
+  In.LFloat = Value;
+  if (!Required) *Value = 0, *Length = 0;
+  CliPushArg(Cli, Name, Desc, In, CliValueFloat, Count, Required);
+};
+
+void
+CliStrN(cli* Cli, const char*** Value, usize* Length, usize Count, const char* Name, const char* Desc)
+{
+  if (!Value || !Length || !Value) return;
+  u8 Required = *Name != '?';
+  cli_value In = {0};
+  In.Length = Length;
+  In.LString = Value;
+  if (!Required) *Value = 0, *Length = 0;
+  CliPushArg(Cli, Name, Desc, In, CliValueString, Count, Required);
 };
