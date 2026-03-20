@@ -564,6 +564,7 @@ CliCommand(cli* Cli, u32* Called, const char* Name, const char* Desc)
   cli_cmd* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
   if (!Node) return;
   
+  *Called = 0;
   Node->Name = CliStrC(Name, Cli->Arena);
   Node->Desc = CliStrC(Desc, Cli->Arena);
   Node->Called = Called;
@@ -1795,6 +1796,9 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         };
       };
     };
+
+    if (!Error.Kind) *Command->Called = 1;
+    
   } else if (!Stop && !Command && !Error.Kind)
   {
     Error.Kind = CliErrorExpectedCommandName;
