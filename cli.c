@@ -610,9 +610,10 @@ CliOption(cli* Cli, u32* Value, const char* Name, const char* Desc)
   cli_str Long = CliExpandName(Node->Name, &Short);
   Cli->Indentation = CliMax(Cli->Indentation, Long.Length + 9);
 
-  if (Cli->CTail)
+  if (Cli->CTail || Cli->Default)
   {
-    CliDLLPush(Cli->CTail, Node, OHead, OTail);
+    cli_cmd* Cmd = Cli->CTail ? Cli->CTail : Cli->Default;
+    CliDLLPush(Cmd, Node, OHead, OTail);
   } else 
   {
     CliDLLPush(Cli, Node, OHead, OTail);
