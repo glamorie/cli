@@ -499,6 +499,7 @@ struct cli_error_cursor
   cli_arg* ArgumentDoesNotExpectValue;
   cli_str UnexpectedValue;
   usize ExpectedCount, GotCount;
+  u32 Positional;
   u32 Kind;
 };
 
@@ -558,7 +559,7 @@ CliExpandName(cli_str Name, u8* Alias);
 void
 CliCommand(cli* Cli, u32* Called, const char* Name, const char* Desc)
 {
-  if (!Cli || !Called || !Name || Desc) return;
+  if (!Cli || !Called || !Name || !Desc) return;
   cli_cmd* Node = CliArenaZPush(Cli->Arena, sizeof(*Node));
   if (!Node) return;
   
@@ -1712,6 +1713,7 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
           Error.UnexpectedValue = Value;
           Error.Kind = CliErrorUnexpectedValue;
         };
+        if (Error.Kind) Error.Positional = 1;
       } else if (Token == CliTokenFlag || Token == CliTokenAlias)
       {
         cli_opt* Opt = 0;
@@ -1764,6 +1766,7 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         {
           Error.RequiredArg = Node;
           Error.Kind = CliErrorRequiredArgument;
+          Error.Positional = 1;
           break;
         };
       };
@@ -1778,7 +1781,7 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         };
       };
     };
-  } else if (!Stop && !Command && Token != CliTokenEof)
+  } else if (!Stop && !Command)
   {
     Error.Kind = CliErrorExpectedCommandName;
   };
@@ -2317,7 +2320,9 @@ CliWriteError(cli* Cli, cli_writeable Out)
       cli_str Name = CliExpandName(Cli->Error.NotEnoughValues->Name, &Short);
       usize Expected = Cli->Error.ExpectedCount;
       usize Got = Cli->Error.GotCount;
-      CliPutcs(Out, "Argument `--");
+      u32 Positional = Cli->Error.Positional;
+      CliPutcs(Out, "Argument `");
+      if (!Positional) CliPutcs(Out, "--");
       CliPuts(Out, Name.Value, Name.Length);
       CliPutcs(Out, "` Expected ");
       CliPutUsize(Out, Expected);
@@ -2369,7 +2374,9 @@ CliWriteError(cli* Cli, cli_writeable Out)
       CliPutcs(Out, "Error: ");
       u8 Short = 0;
       cli_str Name = CliExpandName(Cli->Error.RequiredArg->Name, &Short);
-      CliPutcs(Out, "Required argument `--");
+      u32 Positional = Cli->Error.Positional;
+      CliPutcs(Out, "Required argument `");
+      if (!Positional) CliPutcs(Out, "--");
       CliPuts(Out, Name.Value, Name.Length);
       CliPutcs(Out, "` did not recieve any value.");
     } break;
