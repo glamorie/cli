@@ -500,6 +500,7 @@ struct cli_error_cursor
   cli_str UnexpectedValue;
   usize ExpectedCount, GotCount;
   u32 Positional;
+  u32 IsAlias;
   u32 Kind;
 };
 
@@ -1199,11 +1200,11 @@ enum
   CliErrorParsing,
   CliErrorMissingValue,
   CliErrorNotEnoughValues,
-  CliErrorUnkownOption,
+  CliErrorUnknownOption,
   CliErrorExpectedCommandName,
   CliErrorUnexpectedValue,
   CliErrorArgumentDoesNotExpectValue,
-  CliErrorUknownCommand,
+  CliErrorUnknownCommand,
   CliErrorRequiredArgument,
   
 };
@@ -1216,11 +1217,11 @@ const char* _CliErrorName[] =
 [CliErrorParsing] = "CliErrorParsing",
 [CliErrorMissingValue] = "CliErrorMissingValue",
 [CliErrorNotEnoughValues] = "CliErrorNotEnoughValues",
-[CliErrorUnkownOption] = "CliErrorUnkownOption",
+[CliErrorUnknownOption] = "CliErrorUnknownOption",
 [CliErrorExpectedCommandName] = "CliErrorExpectedCommandName",
 [CliErrorUnexpectedValue] = "CliErrorUnexpectedValue",
 [CliErrorArgumentDoesNotExpectValue] = "CliErrorArgumentDoesNotExpectValue",
-[CliErrorUknownCommand] = "CliErrorUknownCommand",
+[CliErrorUnknownCommand] = "CliErrorUnknownCommand",
 [CliErrorRequiredArgument] = "CliErrorRequiredArgument",
 };
 #endif
@@ -1613,8 +1614,9 @@ CliResolveBatchedAlias(cli_str Source, cli_opt* Options1, cli_opt* Options2, cli
       };
     } else 
     {
-      Error = CliErrorUnkownOption;
+      Error = CliErrorUnknownOption;
       ErrorP->UknownOption = Source;
+      ErrorP->IsAlias = 1;
       break;
     };
   };
@@ -1651,13 +1653,13 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
       Error.UknownCommand = Value;
       if (Found) Command = Found;
       else if (Command) CliLexerRollback(&Args);// Assume the name is a positional argument and fallback to the default
-      else Error.Kind = CliErrorUknownCommand;
+      else Error.Kind = CliErrorUnknownCommand;
       break; 
     } else if (Token == CliTokenAliasValue)
     {
       Error.Kind = CliResolveBatchedAlias(Value, Cli->OHead, 0, 0, &Error, &Stop);
       
-      if (Command && Error.Kind ==CliErrorUnkownOption)
+      if (Command && Error.Kind ==CliErrorUnknownOption)
       {
         CliLexerRollback(&Args);
         Error.Kind = 0;
@@ -1685,7 +1687,9 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         break;
       } else if (!Command && !Opt)
       {
-        Error.Kind = CliErrorUnkownOption;
+        Error.Kind = CliErrorUnknownOption;
+        Error.UknownOption = Value;
+        Error.IsAlias = Token == CliTokenAlias;
       };
     };
   };
@@ -1736,17 +1740,27 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
           };
         } else 
         {
-          Error.Kind = CliErrorUnkownOption;
+          Error.Kind = CliErrorUnknownOption;
+          Error.UknownOption = Value;
+          Error.IsAlias = Token == CliTokenAlias;
         };
       } else if (Token == CliTokenFlagValue)
       {
         cli_arg* Arg = CliArgSearch(Command->KHead, Value);
         Error.NotEnoughValues = Arg;
         
-        if (!Arg) Error.Kind = CliErrorUnkownOption;
-        else if (Arg->Count == 1) Error.Kind = CliLexerRead1(&Args, Arg->Kind, &Arg->Value, &Error);
-        else Error.Kind = CliErrorNotEnoughValues;
-        if (!Error.Kind) Arg->Set = 1;
+        if (Arg)
+        {
+          if (Arg->Count == 1) Error.Kind = CliLexerRead1(&Args, Arg->Kind, &Arg->Value, &Error);
+          else Error.Kind = CliErrorNotEnoughValues;
+          if (!Error.Kind) Arg->Set = 1;
+        } else 
+        {
+          Error.Kind = CliErrorUnknownOption;
+          Error.UknownOption = Value;
+          Error.IsAlias = 0;
+        };
+
       } else if (Token == CliTokenAliasValue)
       {
         u32 Stop = 0;
@@ -1781,7 +1795,7 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
         };
       };
     };
-  } else if (!Stop && !Command)
+  } else if (!Stop && !Command && !Error.Kind)
   {
     Error.Kind = CliErrorExpectedCommandName;
   };
@@ -2330,13 +2344,14 @@ CliWriteError(cli* Cli, cli_writeable Out)
       CliPutUsize(Out, Expected);
       CliPutcs(Out, " value(s) but recieved.");
     } break;
-    case CliErrorUnkownOption:
+    case CliErrorUnknownOption:
     {
       CliPutcs(Out, "Error: ");
       cli_str Name = Cli->Error.UknownOption;
-      CliPutcs(Out, "Uknown option `");
+      CliPutcs(Out, "Uknown option `-");
+      if (!Cli->Error.IsAlias) CliPutChar(Out, '-');
       CliPuts(Out, Name.Value, Name.Length);
-      CliPutcs(Out, " `.");
+      CliPutcs(Out, "`.");
     } break;
     case CliErrorExpectedCommandName:
     {
@@ -2360,7 +2375,7 @@ CliWriteError(cli* Cli, cli_writeable Out)
       CliPuts(Out, Name.Value, Name.Length);
       CliPutcs(Out, " ` does not require any value.");
     } break;
-    case CliErrorUknownCommand:
+    case CliErrorUnknownCommand:
     {
       CliPutcs(Out, "Error: ");
       u8 Short = 0;
