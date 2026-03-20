@@ -2399,8 +2399,13 @@ CliWriteError(cli* Cli, cli_writeable Out)
   CliPutLine(Out);
   CliPutLine(Out);
   CliPutcs(Out, "Try  : ");
-  CliPutcs(Out, Cli->Argv[0]);
-  CliPutcs(Out, " --help");
+  usize i = 0;
+a0x:
+  CliPutcs(Out, Cli->Argv[i++]);
+  CliPutChar(Out, ' ');
+  if (i == 1 && Cli->Current && Cli->Count > 1) goto a0x;
+
+  CliPutcs(Out, "--help");
   CliPutLine(Out);
 };
 
