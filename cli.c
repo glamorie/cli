@@ -2367,7 +2367,7 @@ CliWriteError(cli* Cli, cli_writeable Out)
       cli_str Name = Cli->Error.UnexpectedValue;
       CliPutcs(Out, "`");
       CliPuts(Out, Name.Value, Name.Length);
-      CliPutcs(Out, " ` was unexpected.");
+      CliPutcs(Out, "` was unexpected.");
     } break;
     case CliErrorArgumentDoesNotExpectValue:
     {
@@ -2376,7 +2376,7 @@ CliWriteError(cli* Cli, cli_writeable Out)
       cli_str Name = CliExpandName(Cli->Error.ArgumentDoesNotExpectValue->Name, &Short);
       CliPutcs(Out, "Argument `--");
       CliPuts(Out, Name.Value, Name.Length);
-      CliPutcs(Out, " ` does not require any value.");
+      CliPutcs(Out, "` does not require any value.");
     } break;
     case CliErrorUnknownCommand:
     {
@@ -2385,7 +2385,7 @@ CliWriteError(cli* Cli, cli_writeable Out)
       cli_str Name = CliExpandName(Cli->Error.UknownCommand, &Short);
       CliPutcs(Out, "Uknown command `");
       CliPuts(Out, Name.Value, Name.Length);
-      CliPutcs(Out, " `.");
+      CliPutcs(Out, "`.");
     } break;
     case CliErrorRequiredArgument:
     {
