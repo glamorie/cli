@@ -1114,7 +1114,7 @@ CliIntParse(cli_str Value)
     Result.Value = Result.Value * Base + D;
   };
   
-  Result.Ok = i == Result.End && SawDigits;
+  Result.Ok = i == Value.Length && SawDigits;
   Result.End = i;
   Result.Value = Negative ? -Result.Value : Result.Value;
   return Result;
@@ -1917,7 +1917,6 @@ CliWriteIndentedText(cli_writeable Out, usize Indentation, usize Client, cli_str
     CliPutChar(Out, ' ');
     r += L + 1;
   };
-  CliPutLine(Out);
   CliPutLine(Out);
 };
 
