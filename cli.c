@@ -1549,7 +1549,7 @@ CliLexerReadN(cli_lexer* Args, u16 Kind, usize Count, cli_value* Value, cli_erro
 static u32 // Read all until a flag is encountered.
 CliLexerReadX(cli_lexer* Args, u16 Kind, cli_value* Value, cli_error_cursor* ErrorP)
 {
-  CliFree(Value->LFloat);
+  CliFree(*Value->LFloat);
   usize Count = CliLexerPeekLength(Args);
   
   if (!Count)
