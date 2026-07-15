@@ -176,21 +176,21 @@ CliCharUtf8Encode(u32 Char, u8* Out)
     Length = 1;
   } else if (Char <= 0x7FF)
   {
-    Out[0] = 0xC0 | (Char >> 6);
-    Out[1] = 0x80 | (Char & 0x3F);
+    Out[0] = (u8)(0xC0 | (Char >> 6));
+    Out[1] = (u8)(0x80 | (Char & 0x3F));
     Length = 2;
   } else if (Char <= 0xFFFF)
   {
-    Out[0] = 0xE0 | (Char >> 12);
-    Out[1] = 0x80 | ((Char >> 6) & 0x3F);
-    Out[2] = 0x80 | (Char & 0x3F);
+    Out[0] = (u8)(0xE0 | (Char >> 12));
+    Out[1] = (u8)(0x80 | ((Char >> 6) & 0x3F));
+    Out[2] = (u8)(0x80 | (Char & 0x3F));
     Length = 3;
   } else
   {
-    Out[0] = 0xF0 | (Char >> 18);
-    Out[1] = 0x80 | ((Char >> 12) & 0x3F);
-    Out[2] = 0x80 | ((Char >> 6) & 0x3F);
-    Out[3] = 0x80 | (Char & 0x3F);
+    Out[0] = (u8)(0xF0 | (Char >> 18));
+    Out[1] = (u8)(0x80 | ((Char >> 12) & 0x3F));
+    Out[2] = (u8)(0x80 | ((Char >> 6) & 0x3F));
+    Out[3] = (u8)(0x80 | (Char & 0x3F));
     Length = 4;
   };
   return Length;
@@ -442,7 +442,7 @@ struct cli_value
     i64** LNumber;
     double** LFloat;
     const char*** LString;
-  };
+  } Value;
 };
 
 typedef struct cli_arg cli_arg;
@@ -658,7 +658,7 @@ void
 CliInt(cli* Cli, i64* Value, const char* Name, const char* Desc)
 {
   cli_value In = {0};
-  In.Number = Value;
+  In.Value.Number = Value;
   CliPushArg(Cli, Name, Desc, In, CliValueInt, 1, 1);
 };
 
@@ -666,7 +666,7 @@ void
 CliFloat(cli* Cli, double* Value, const char* Name, const char* Desc)
 {
   cli_value In = {0};
-  In.Float = Value;
+  In.Value.Float = Value;
   CliPushArg(Cli, Name, Desc, In, CliValueFloat, 1, 1);
 };
 
@@ -674,7 +674,7 @@ void
 CliStr(cli* Cli, const char** Value, const char* Name, const char* Desc)
 {
   cli_value In = {0};
-  In.String = Value;
+  In.Value.String = Value;
   CliPushArg(Cli, Name, Desc, In, CliValueString, 1, 1);
 };
 
@@ -683,7 +683,7 @@ CliIntOr(cli* Cli, i64* Value, i64 Default, const char* Name, const char* Desc)
 {
   if (!Value) return;
   cli_value In = {0};
-  In.Number = Value;
+  In.Value.Number = Value;
   *Value = Default;
   CliPushArg(Cli, Name, Desc, In, CliValueInt, 1, 0);
 };
@@ -693,7 +693,7 @@ CliFloatOr(cli* Cli, double* Value, double Default, const char* Name, const char
 {
   if (!Value) return;
   cli_value In = {0};
-  In.Float = Value;
+  In.Value.Float = Value;
   *Value = Default;
   CliPushArg(Cli, Name, Desc, In, CliValueFloat, 1, 0);
 };
@@ -703,7 +703,7 @@ CliStrOr(cli* Cli, const char** Value, const char* Default, const char* Name, co
 {
   if (!Value) return;
   cli_value In = {0};
-  In.String = Value;
+  In.Value.String = Value;
   *Value = Default;
   CliPushArg(Cli, Name, Desc, In, CliValueString, 1, 0);
 };
@@ -715,7 +715,7 @@ CliIntN(cli* Cli, i64** Value, usize* Length, usize Count, const char* Name, con
   u8 Required = *Name != '?';
   cli_value In = {0};
   In.Length = Length;
-  In.LNumber = Value;
+  In.Value.LNumber = Value;
   if (!Required) *Value = 0, *Length = 0;
   CliPushArg(Cli, Name, Desc, In, CliValueInt, Count, Required);
 };
@@ -727,7 +727,7 @@ CliFloatN(cli* Cli, double** Value, usize* Length, usize Count, const char* Name
   u8 Required = *Name != '?';
   cli_value In = {0};
   In.Length = Length;
-  In.LFloat = Value;
+  In.Value.LFloat = Value;
   if (!Required) *Value = 0, *Length = 0;
   CliPushArg(Cli, Name, Desc, In, CliValueFloat, Count, Required);
 };
@@ -739,7 +739,7 @@ CliStrN(cli* Cli, const char*** Value, usize* Length, usize Count, const char* N
   u8 Required = *Name != '?';
   cli_value In = {0};
   In.Length = Length;
-  In.LString = Value;
+  In.Value.LString = Value;
   if (!Required) *Value = 0, *Length = 0;
   CliPushArg(Cli, Name, Desc, In, CliValueString, Count, Required);
 };
@@ -754,10 +754,10 @@ struct cli_flit
   {
     u64 Bits;
     double Value;
-  };
+  } x;
 };
 
-#define CLI_FLT_LITERAL(v) (((cli_flit){.Bits = (v)}).Value)
+#define CLI_FLT_LITERAL(v) (((cli_flit){.x.Bits = (v)}).x.Value)
 #define CLI_INFINITY CLI_FLT_LITERAL(0x7ff0000000000000ULL)
 #define CLI_NAN CLI_FLT_LITERAL(0x7ff8000000000000ULL)
 
@@ -815,7 +815,7 @@ CliCheckDoubleLiteral(cli_str s)
       {
         Result.Value = sign * CLI_INFINITY;
         
-        if (m == 8) Result.End = nsign + m;
+        if (m == 8) Result.End = (int)(nsign + m);
         else Result.End = nsign + 3;
         
         Result.Ok = 1;
@@ -1135,8 +1135,7 @@ CliExpandName(cli_str Name, u8* Alias) // Extract the alias and the flag of the 
 {
   u8 A = 0;
   cli_str Out = {0};
-  int i = 0;
-  
+
   if (Name.Value[0] == '!')
   {
     Name.Value = Name.Value + 1;
@@ -1259,16 +1258,16 @@ CliParseValue(cli_str Source, u16 Type, cli_value* Out, cli_error_cursor* ErrorP
   if (Type == CliValueFloat)
   {
     cli_double_parse Result = CliDoubleParse(Source);
-    if (Result.Ok) *Out->Float = Result.Value;
+    if (Result.Ok) *Out->Value.Float = Result.Value;
     Ok = Result.Ok;
   } else if (Type == CliValueInt)
   {
     cli_int_parse Result = CliIntParse(Source);
-    if (Result.Ok) *Out->Number = Result.Value;
+    if (Result.Ok) *Out->Value.Number = Result.Value;
     Ok = Result.Ok;
   } else if (Type == CliValueString)
   {
-    *Out->String = (const char*)Source.Value;
+    *Out->Value.String = (const char*)Source.Value;
     Ok = 1;
   };
   u32 Error = Ok ? 0 : CliErrorParsing;
@@ -1396,6 +1395,7 @@ CliLexerNextEscaped(cli_lexer* Args, u32* Token, cli_str* Out)
 static u32 // Treat everything from the current position onwards as values.
 CliLexerNextAll(cli_lexer* Args, u32* Token, cli_str* Out)
 {
+  (void)Token;
   u32 T = 0;
   return CliLexerNext(Args, &T, Out, 1);
 };
@@ -1474,7 +1474,6 @@ CliLexerRead1(cli_lexer* Args, u16 Kind, cli_value* Out, cli_error_cursor* Error
 {
   cli_str Source = {0};
   u32 Token = 0;
-  cli_value Value = {0};
   u32 Error = 0;
   
   CliLexerNextEscaped(Args, &Token, &Source);
@@ -1527,7 +1526,7 @@ CliLexerRead(cli_lexer* Args, u16 Kind, void* Array, usize Count, cli_error_curs
 static u32 // Read a fixed number of values
 CliLexerReadN(cli_lexer* Args, u16 Kind, usize Count, cli_value* Value, cli_error_cursor* ErrorP)
 {
-  CliFree(Value->LFloat);
+  CliFree(Value->Value.LFloat);
   
   void* Array = CliMalloc(CliSizeof(Kind) * Count);
   assert(Array);
@@ -1541,7 +1540,7 @@ CliLexerReadN(cli_lexer* Args, u16 Kind, usize Count, cli_value* Value, cli_erro
     Count = 0;
   };
   
-  *Value->LFloat = Array;
+  *Value->Value.LFloat = Array;
   *Value->Length = Count;
   return Error;
 };
@@ -1549,7 +1548,7 @@ CliLexerReadN(cli_lexer* Args, u16 Kind, usize Count, cli_value* Value, cli_erro
 static u32 // Read all until a flag is encountered.
 CliLexerReadX(cli_lexer* Args, u16 Kind, cli_value* Value, cli_error_cursor* ErrorP)
 {
-  CliFree(*Value->LFloat);
+  CliFree(*Value->Value.LFloat);
   usize Count = CliLexerPeekLength(Args);
   
   if (!Count)
@@ -1569,7 +1568,7 @@ CliLexerReadX(cli_lexer* Args, u16 Kind, cli_value* Value, cli_error_cursor* Err
     Count = 0;
   };
   
-  *Value->LFloat = Array;
+  *Value->Value.LFloat = Array;
   *Value->Length = Count;
   
   return Error;
@@ -1764,10 +1763,9 @@ CliLexerParse(cli* Cli, const char** Argv, usize Argc)
 
       } else if (Token == CliTokenAliasValue)
       {
-        u32 Stop = 0;
-        Error.Kind = CliResolveBatchedAlias(Value, Command->OHead, Cli->OHead, Command->KHead, &Error, &Stop);
-        
-        if (Stop) break;
+        u32 Stop2 = 0;
+        Error.Kind = CliResolveBatchedAlias(Value, Command->OHead, Cli->OHead, Command->KHead, &Error, &Stop2);
+        if (Stop2) break;
       };
     };
     
@@ -1924,6 +1922,7 @@ CliWriteIndentedText(cli_writeable Out, usize Indentation, usize Client, cli_str
 static void
 CliWriteFlagName(cli_writeable Out, cli_str Name, usize Indentation, usize Client)
 {
+  (void)Client;
   u8 Short = 0;
   cli_str Long = CliExpandName(Name, &Short);
   
@@ -1947,6 +1946,7 @@ CliWriteFlagName(cli_writeable Out, cli_str Name, usize Indentation, usize Clien
 static void
 CliWriteArgName(cli_writeable Out, cli_str Name, usize Indentation, usize Client)
 {
+  (void)Client;
   CliPutCharN(Out, ' ', 2);
   CliPuts(Out, Name.Value, Name.Length);
   CliPutCharN(Out, ' ', Indentation - Name.Length - 4 + 2);
@@ -1956,6 +1956,7 @@ CliWriteArgName(cli_writeable Out, cli_str Name, usize Indentation, usize Client
 static void
 CliWriteCmdName(cli_writeable Out, cli_str Name, usize Indentation, usize Client)
 {
+  (void)Client;
   u8 Short = 0;
   cli_str Long = CliExpandName(Name, &Short);
   
@@ -2218,7 +2219,7 @@ CliFile_Write(void* This, u32 Char)
   CliFileWrite(File, Parts, 1, Length);
 };
 
-static void
+void
 CliHelpWrite(cli* Cli, cli_file_t File, usize ConsoleWidth)
 {
   if (!Cli) return;
@@ -2272,6 +2273,8 @@ CliHelpAsString16(cli* Cli, size_t* Length, usize ConsoleWidth)
     String = CliSbRead16(&Buffer, &L);
     CliArenaPopTo(Cli->Arena, Position);
   };
+
+  if (Length) *Length = L;
   return String;
 };
 
@@ -2283,7 +2286,6 @@ CliPutUsize(cli_writeable Out, usize Value)
   if (Out.Callback)
   {
     u8 Buffer[0x30];
-    usize C = sizeof(Buffer);
     usize i = 0;
 
     if (Value == 0) Buffer[i++] = '0';
@@ -2344,7 +2346,7 @@ CliWriteError(cli* Cli, cli_writeable Out)
       CliPutcs(Out, "` Expected ");
       CliPutUsize(Out, Expected);
       CliPutcs(Out, " value(s) but recieved ");
-      CliPutUsize(Out, Expected);
+      CliPutUsize(Out, Got);
       CliPutcs(Out, " value(s) but recieved.");
     } break;
     case CliErrorUnknownOption:
@@ -2454,6 +2456,8 @@ CliErrorAsString16(cli* Cli, size_t* Length)
     String = CliSbRead16(&Buffer, &L);
     CliArenaPopTo(Cli->Arena, Position);
   };
+
+  if (Length) *Length = L;
   return String;
 };
 
